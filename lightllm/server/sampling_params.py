@@ -28,11 +28,11 @@ class SamplingParams:
         self.max_new_tokens = max_new_tokens
         self.stop_sequences = stop_sequences
         if self.do_sample == False:
-            self.temperature = 1.0
+            # self.temperature = 1.0
             self.top_p = 1.0
             self.top_k = 1
         if self.temperature >= 0.0 and self.temperature < _SAMPLING_EPS: # temperature is too slow, change to greedy search
-            self.temperature = 1.0
+            # self.temperature = 1.0
             self.top_k = 1
         return
     
