@@ -19,6 +19,8 @@
 import asyncio
 import time
 import torch
+import torch_dipu
+import DeepLinkExt
 import uvloop
 import sys
 
@@ -393,5 +395,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # torch.multiprocessing.set_start_method('spawn'), # this code will not be ok for settings to fork to subprocess
+    torch.multiprocessing.set_start_method('spawn'),  # this code will not be ok for settings to fork to subprocess
     main()
