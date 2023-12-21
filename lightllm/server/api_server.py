@@ -22,6 +22,9 @@ import torch
 import uvloop
 import sys
 
+import DipuExt_poc
+import dipu_ext.ext_ as ext
+
 from .build_prompt import build_prompt
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
