@@ -22,7 +22,7 @@ import torch
 import uvloop
 import sys
 
-import DipuExt_poc
+import DeepLinkExt #This package is the Dipu extension package under model/LightLLM65B, please use the name of tha dir.
 import dipu_ext.ext_ as ext
 
 from .build_prompt import build_prompt
