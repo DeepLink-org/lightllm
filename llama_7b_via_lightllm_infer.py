@@ -15,20 +15,26 @@ def check_server(host, port):
             return False
 
 
-def start_server(model_dir, tokenizer_mode, tp, max_total_token_num):
+def start_server(model_dir, tokenizer_mode, tp, max_total_token_num, host, port):
     lightllm_command = [
         "python", "-m", "lightllm.server.api_server",
         "--model_dir", model_dir,
         "--tokenizer_mode", tokenizer_mode,
         "--tp", str(tp),
         "--max_total_token_num", str(max_total_token_num),
+        "--host", host,
+        "--port", str(port),
     ]
     subprocess.run(lightllm_command)
 
 
-def start_client(current_working_directory):
-    subprocess.run(['python', os.path.join(
-        current_working_directory, "chat.py")])
+def start_client(current_working_directory, url):
+    client_cmd = [
+    'python',
+    os.path.join(current_working_directory, "chat.py"),
+    '--url', url,
+    ]
+    subprocess.run(client_cmd)
 
 
 if __name__ == '__main__':
@@ -51,7 +57,7 @@ if __name__ == '__main__':
     current_working_directory = os.path.dirname(os.path.abspath(__file__))
     # 启动服务器进程
     server_process = multiprocessing.Process(
-        target=start_server, args=(args.model_dir, args.tokenizer_mode, args.tp, args.max_total_token_num))
+        target=start_server, args=(args.model_dir, args.tokenizer_mode, args.tp, args.max_total_token_num, args.host, args.port))
     try:
         server_process.start()
     except Exception as e:
@@ -77,7 +83,7 @@ if __name__ == '__main__':
 
     # 启动客户端进程
     client_process = multiprocessing.Process(
-        target=start_client, args=(current_working_directory,))
+        target=start_client, args=(current_working_directory, 'http://' + args.host + ':' + str(args.port) + '/generate'))
     try:
         client_process.start()
     except Exception as e:
