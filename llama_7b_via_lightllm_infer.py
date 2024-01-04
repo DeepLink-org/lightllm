@@ -52,7 +52,13 @@ if __name__ == '__main__':
     # 启动服务器进程
     server_process = multiprocessing.Process(
         target=start_server, args=(args.model_dir, args.tokenizer_mode, args.tp, args.max_total_token_num))
-    server_process.start()
+    try:
+        server_process.start()
+    except Exception as e:
+        print(f"服务器进程启动失败: {e}")
+        server_process.terminate()
+        server_process.join()
+        exit(1)
 
     # 设置超时时间为10分钟
     timeout = 10 * 60
@@ -72,11 +78,26 @@ if __name__ == '__main__':
     # 启动客户端进程
     client_process = multiprocessing.Process(
         target=start_client, args=(current_working_directory,))
-    client_process.start()
+    try:
+        client_process.start()
+    except Exception as e:
+        print(f"客户端进程启动失败: {e}")
+        client_process.terminate()
+        # 如果客户端启动失败，也需关闭服务器进程
+        server_process.terminate()
+        server_process.join()
+        exit(1)
 
-    # 等待客户端结束
-    client_process.join()
-
-    # 结束服务器进程
-    server_process.terminate()
-    server_process.join()
+    # 等待客户端进程结束
+    try:
+        client_process.join()
+    except Exception as e:
+        print(f"客户端进程运行时出现异常: {e}")
+    finally:
+        if client_process.is_alive():
+            client_process.terminate()
+        server_process.terminate()
+        server_process.join()
+        # 如果捕获到异常，退出程序
+        if 'e' in locals():
+            exit(1)
