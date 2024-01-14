@@ -23,6 +23,7 @@ import torch_dipu
 import DeepLinkExt
 import uvloop
 import sys
+import os
 
 from .build_prompt import build_prompt
 
@@ -314,6 +315,7 @@ def main():
     assert args.max_req_input_len < args.max_req_total_len
     setting["max_req_total_len"] = args.max_req_total_len
     setting["nccl_port"] = args.nccl_port
+    os.environ["lightllm_nccl_port"] = str(args.nccl_port)
 
     if args.batch_max_tokens is None:
         batch_max_tokens = int(1 / 6 * args.max_total_token_num)

@@ -15,7 +15,30 @@ def check_server(host, port):
             return False
 
 
-def start_server(model_dir, tokenizer_mode, tp, max_total_token_num, host, port):
+def is_port_available(host, port):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
+def find_available_port(host, default_port, avoid_ports=None):
+    if avoid_ports is None:
+        avoid_ports = []
+
+    if is_port_available(host, default_port) and default_port not in avoid_ports:
+        return default_port
+    # lightllm needs three more ports that do not conflict with each other
+    for port in range(30000, 65536):
+        if is_port_available(host, port) and port not in avoid_ports:
+            return port
+
+    raise Exception("No available ports found within the specified range")
+
+
+def start_server(model_dir, tokenizer_mode, tp, max_total_token_num, host, port, nccl_port):
     lightllm_command = [
         "python", "-m", "lightllm.server.api_server",
         "--model_dir", model_dir,
@@ -24,6 +47,7 @@ def start_server(model_dir, tokenizer_mode, tp, max_total_token_num, host, port)
         "--max_total_token_num", str(max_total_token_num),
         "--host", host,
         "--port", str(port),
+        "--nccl_port", str(nccl_port),
     ]
     subprocess.run(lightllm_command)
 
@@ -52,12 +76,18 @@ if __name__ == '__main__':
                         help="Host where the server will be running")
     parser.add_argument("--port", type=int, default=8000,
                         help="Port on which the server will be listening")
+    parser.add_argument("--nccl_port", type=int, default=28765,
+                        help="The nccl_port to build a distributed environment for PyTorch")
     args = parser.parse_args()
 
     current_working_directory = os.path.dirname(os.path.abspath(__file__))
+    args.port = find_available_port(args.host, args.port, avoid_ports=[args.nccl_port])
+    args.nccl_port = find_available_port(args.host, args.nccl_port, avoid_ports=[args.port])
+    print(f"selected port: {args.port}")
+    print(f"selected nccl_port: {args.nccl_port}")
     # 启动服务器进程
     server_process = multiprocessing.Process(
-        target=start_server, args=(args.model_dir, args.tokenizer_mode, args.tp, args.max_total_token_num, args.host, args.port))
+        target=start_server, args=(args.model_dir, args.tokenizer_mode, args.tp, args.max_total_token_num, args.host, args.port, args.nccl_port))
     try:
         server_process.start()
     except Exception as e:
