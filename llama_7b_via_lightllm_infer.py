@@ -4,6 +4,7 @@ import subprocess
 import time
 import argparse
 import socket
+import psutil
 
 
 def check_server(host, port):
@@ -52,6 +53,29 @@ def start_server(model_dir, tokenizer_mode, tp, max_total_token_num, host, port,
     subprocess.run(lightllm_command)
 
 
+def terminate_process_and_children(p):
+    try:
+        parent = psutil.Process(p.pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for child in children:
+        child.terminate()
+    p.terminate()
+
+
+def wait_for_process_and_children(p, timeout=None):
+    """ Wait for a process and its children to terminate """
+    try:
+        parent = psutil.Process(p.pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for child in children:
+        child.wait(timeout=timeout)
+    p.join(timeout)
+
+
 def start_client(current_working_directory, url):
     client_cmd = [
     'python',
@@ -92,8 +116,8 @@ if __name__ == '__main__':
         server_process.start()
     except Exception as e:
         print(f"服务器进程启动失败: {e}")
-        server_process.terminate()
-        server_process.join()
+        terminate_process_and_children(server_process)
+        wait_for_process_and_children(server_process)
         exit(1)
 
     # 设置超时时间为10分钟
@@ -105,8 +129,8 @@ if __name__ == '__main__':
     while not check_server(args.host, args.port):
         if time.time() - start_time > timeout:
             print("等待服务器启动超时，程序退出。")
-            server_process.terminate()
-            server_process.join()
+            terminate_process_and_children(server_process)
+            wait_for_process_and_children(server_process)
             exit(1)
         time.sleep(5)
     print("服务器已启动!")
@@ -120,8 +144,8 @@ if __name__ == '__main__':
         print(f"客户端进程启动失败: {e}")
         client_process.terminate()
         # 如果客户端启动失败，也需关闭服务器进程
-        server_process.terminate()
-        server_process.join()
+        terminate_process_and_children(server_process)
+        wait_for_process_and_children(server_process)
         exit(1)
 
     # 等待客户端进程结束
@@ -132,8 +156,8 @@ if __name__ == '__main__':
     finally:
         if client_process.is_alive():
             client_process.terminate()
-        server_process.terminate()
-        server_process.join()
+        terminate_process_and_children(server_process)
+        wait_for_process_and_children(server_process)
         # 如果捕获到异常，退出程序
         if 'e' in locals():
             exit(1)
