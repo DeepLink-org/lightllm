@@ -118,6 +118,7 @@ if __name__ == '__main__':
         print(f"服务器进程启动失败: {e}")
         terminate_process_and_children(server_process)
         wait_for_process_and_children(server_process)
+        print("回收服务器进程及其子进程资源！")
         exit(1)
 
     # 设置超时时间为10分钟
@@ -128,12 +129,13 @@ if __name__ == '__main__':
     print("等待服务器启动...")
     while not check_server(args.host, args.port):
         if time.time() - start_time > timeout:
-            print("等待服务器启动超时，程序退出。")
+            print("等待服务器进程启动超时，程序退出。")
             terminate_process_and_children(server_process)
             wait_for_process_and_children(server_process)
+            print("回收服务器进程及其子进程资源！")
             exit(1)
         time.sleep(5)
-    print("服务器已启动!")
+    print("服务器进程已启动!")
 
     # 启动客户端进程
     client_process = multiprocessing.Process(
@@ -143,9 +145,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"客户端进程启动失败: {e}")
         client_process.terminate()
-        # 如果客户端启动失败，也需关闭服务器进程
+        # 如果客户端进程启动失败，也需关闭服务器进程
         terminate_process_and_children(server_process)
         wait_for_process_and_children(server_process)
+        print("回收服务器进程及其子进程资源！")
         exit(1)
 
     # 等待客户端进程结束
@@ -158,6 +161,7 @@ if __name__ == '__main__':
             client_process.terminate()
         terminate_process_and_children(server_process)
         wait_for_process_and_children(server_process)
+        print("回收服务器进程及其子进程资源！")
         # 如果捕获到异常，退出程序
         if 'e' in locals():
             exit(1)
