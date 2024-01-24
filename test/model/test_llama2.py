@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 def test_llama2_infer():
     from lightllm.models.llama.model import LlamaTpPartModel
     test_model_inference(world_size=1,
-                         model_dir="/tzy/llama-2-7b-chat-hf",
+                         model_dir="/data/share_data/llama_model_data/llama-2-7b-chat-hf",
                          model_class=LlamaTpPartModel,
                          batch_size=1,
                          input_len=16,

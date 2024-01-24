@@ -100,9 +100,8 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     with torch.autograd.profiler.profile(with_stack=True, with_modules=True) as prof:
         logics = model_part.forward(batch_size, total_token_num, input_len, test_data,
                                                     b_req_idx, b_start_loc, b_seq_len, is_prefill=True)
-    output_path = '/tzy/deeplink_lightllm/lightllm/test/model/torch_profile_prefill'
-    prof.export_chrome_trace(output_path)
-
+    # output_path = '/tzy/deeplink_lightllm/lightllm/test/model/torch_profile_prefill'
+    # prof.export_chrome_trace(output_path)
 
     prob_out = torch.softmax(logics, dim=-1)
     predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
@@ -123,8 +122,8 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             with torch.autograd.profiler.profile(with_stack=True, with_modules=True) as prof:
                 logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
                     predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
-            output_path = '/tzy/deeplink_lightllm/lightllm/test/model/torch_profile_decode_' + str(i)
-            prof.export_chrome_trace(output_path)
+            # output_path = '/tzy/deeplink_lightllm/lightllm/test/model/torch_profile_decode_' + str(i)
+            # prof.export_chrome_trace(output_path)
         else:
             logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
                     predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
