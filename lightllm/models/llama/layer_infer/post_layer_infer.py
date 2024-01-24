@@ -27,7 +27,8 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
         return
     
     def _norm(self, input, final_norm_weight_) -> torch.Tensor:
-        return rmsnorm_forward(input, final_norm_weight_, eps=self.eps_)
+        # return rmsnorm_forward(input, final_norm_weight_, eps=self.eps_)
+        return input * torch.rsqrt(input.pow(2).mean(-1, keepdim=True) + self.eps_) * final_norm_weight_
     
     def _slice_get_last_input(self, input_embdings, infer_state: LlamaInferStateInfo):
         if infer_state.is_splitfuse:

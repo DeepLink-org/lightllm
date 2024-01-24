@@ -84,10 +84,12 @@ from torch.profiler import record_function
 #     )
 #     return
 
+arange_tensor = torch.arange(0, 512).cuda()
 def token_softmax_reducev(logics, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, other_kv_index):
     batch, head, dim = b_loc.shape[0], v.shape[1], v.shape[2]
     for i in range(batch):
-        v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device)]
+        # v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device)]
+        v_loc = b_loc[i][max_input_len - b_seq_len[i] + arange_tensor[:b_seq_len[i]]]
         P = logics[:, b_start_loc[i]:b_start_loc[i] + b_seq_len[i]].softmax(-1).reshape(head, 1, 1, b_seq_len[i]).transpose(0, 1)
         V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
         out[i, :] = torch.matmul(P, V).view(1, head, dim)

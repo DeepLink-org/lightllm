@@ -7,7 +7,7 @@ from lightllm.utils.infer_utils import mark_cost_time
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 from typing import Tuple
 
-
+from torch.profiler import record_function
 class TransformerLayerInferTpl(TransformerLayerInfer):
     """
     """
@@ -143,6 +143,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
     
+    @record_function('transformer_context_forward')
     def context_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         self._context_attention(input_embdings,
                                       infer_state,
@@ -150,6 +151,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         self._context_ffn(input_embdings, infer_state, layer_weight)
         return input_embdings
 
+    @record_function('transformer_token_forward')
     def token_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         self._token_attention(input_embdings,
                                     infer_state,

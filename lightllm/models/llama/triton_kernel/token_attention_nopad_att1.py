@@ -165,16 +165,26 @@ from torch.profiler import record_function
 #     )
 #     return
 
-def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len):
+arange_tensor = torch.arange(0, 512).cuda()
+dump_path = '/tzy/deeplink_lightllm/lightllm/test/model/token_attention_data'
+def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len, total_arange_tensor):
     b_loc = Req_to_tokens[B_req_idx]
     batch, head, dim = b_loc.shape[0], q.shape[1], q.shape[2]
     # q_device = q.device
     xq = q.view(batch, 1, head, dim).transpose(1, 2)
     for i in range(batch):
-        k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device='cuda')]
+        # k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=q.device)]
+        current_arange = total_arange_tensor[:b_seq_len[i]]
+        k_loc = b_loc[i][max_input_len - b_seq_len[i] + current_arange]
         key = k[k_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
-        out_loc = b_start_loc[i] + torch.arange(0, b_seq_len[i], device='cuda')
+        # out_loc = b_start_loc[i] + torch.arange(0, b_seq_len[i], device=q.device)
+        out_loc = b_start_loc[i] + current_arange
         out[:, out_loc] = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
     return out
 compiled_token_attention = torch.compile(_token_attention, backend='ascendgraph')
-token_att_fwd = compiled_token_attention
+
+def fake_token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len):
+    return compiled_token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len, arange_tensor)
+
+
+token_att_fwd = fake_token_attention

@@ -16,6 +16,7 @@ from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv
 
 torch.backends.cudnn.enabled = True
 
+from torch.profiler import record_function
 
 class TpPartBaseModel:
     # weight class
@@ -149,7 +150,7 @@ class TpPartBaseModel:
         else:
             return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
-    
+    @record_function('_prefill')    
     def _prefill(self, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state = self.infer_state_class()
         infer_state.is_prefill = True
@@ -188,6 +189,7 @@ class TpPartBaseModel:
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
     
+    @record_function('_decode')
     def _decode(self, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state = self.infer_state_class()
         infer_state.is_prefill = False
@@ -295,6 +297,7 @@ class TpPartBaseModel:
         predict_logics = self._splitfuse_forward(input_ids, infer_state)
         return predict_logics
     
+    @record_function('_context_forward')
     @final
     def _context_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
@@ -304,6 +307,7 @@ class TpPartBaseModel:
         predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
         return predict_logics
 
+    @record_function('_token_forward')
     @final
     def _token_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
