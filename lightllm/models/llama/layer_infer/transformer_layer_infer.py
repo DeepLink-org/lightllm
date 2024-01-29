@@ -31,9 +31,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
 
-        self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph')
-        self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph')
-        self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph')
+        self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph', dynamic=False)
+        self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph', dynamic=False)
+        self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph', dynamic=False)
         return
     
     def _bind_func(self):

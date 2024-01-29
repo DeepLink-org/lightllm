@@ -92,5 +92,5 @@ def token_softmax_reducev(logics, v, out, b_loc, b_start_loc, b_seq_len, max_inp
         V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
         out[i, :] = torch.matmul(P, V).view(1, head, dim)
     return out
-compiled_token_softmax_reducev = torch.compile(token_softmax_reducev, backend='ascendgraph')
+compiled_token_softmax_reducev = torch.compile(token_softmax_reducev, backend='ascendgraph', dynamic=False)
 token_softmax_reducev_fwd = compiled_token_softmax_reducev

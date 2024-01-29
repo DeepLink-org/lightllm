@@ -111,7 +111,7 @@ def torch_rotary_emb(x, cos, sin):
     o0 = x0 * cos - x1 * sin
     o1 = x0 * sin + x1 * cos
     return torch.cat((o0, o1), dim=-1)
-compiled_torch_rotary_emb = torch.compile(torch_rotary_emb, backend='ascendgraph')
+compiled_torch_rotary_emb = torch.compile(torch_rotary_emb, backend='ascendgraph', dynamic=False)
 
 
 rotary_emb_fwd = compiled_torch_rotary_emb

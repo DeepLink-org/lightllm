@@ -337,7 +337,7 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim):
     return output
 
 
-compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph')
+compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
 
 
 @record_function('eager_context_attention_kernel')
