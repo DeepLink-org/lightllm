@@ -122,7 +122,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                               o_tensor1.view(-1, self.tp_q_head_num_, self.head_dim_),
                               infer_state.b_start_loc,
                               infer_state.b_seq_len,
-                              infer_state.max_len_in_batch)
+                              infer_state.max_len_in_batch,
+                              infer_state.masks)
+
         return o_tensor
     
     # def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
@@ -246,7 +248,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
 
         with record_function("token_att_fwd"):
-            att_m_tensor = token_att_fwd(q.view(calcu_shape1),
+            t = att_m_tensor = token_att_fwd(q.view(calcu_shape1),
                         infer_state.mem_manager.key_buffer[self.layer_num_],
                         att_m_tensor1,
                         infer_state.req_manager.req_to_token_indexs,
@@ -256,7 +258,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                         infer_state.max_len_in_batch)
         
         o_tensor1 = torch.empty_like(q) if out is None else out
-        
+
+        att_m_tensor[-1:, :] += infer_state.masks.reshape(-1)
+
         # if triton.__version__ == "2.0.0":
         #     prob = torch.empty_like(att_m_tensor)
         #     token_softmax_fwd(att_m_tensor, infer_state.b_start_loc, infer_state.b_seq_len, prob, infer_state.max_len_in_batch)

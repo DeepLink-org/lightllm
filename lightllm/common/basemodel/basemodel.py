@@ -140,18 +140,19 @@ class TpPartBaseModel:
             total_token_num,
             max_len_in_batch,
             input_ids : torch.Tensor,
+            mask : torch.Tensor,
             b_req_idx : torch.Tensor,
             b_start_loc : torch.Tensor,
             b_seq_len : torch.Tensor,
             multimodal_params=None,
             is_prefill=True):
         if is_prefill:
-            return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, mask, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
         else:
-            return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, mask, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
     @record_function('_prefill')    
-    def _prefill(self, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
+    def _prefill(self, batch_size, total_token_num, max_len_in_batch, input_ids, mask, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state = self.infer_state_class()
         infer_state.is_prefill = True
         infer_state.return_all_prompt_logprobs = self.return_all_prompt_logprobs
@@ -185,12 +186,12 @@ class TpPartBaseModel:
         init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
                             max_len_in_batch, infer_state.mem_index)
 
-        infer_state.init_some_extra_state(self, input_ids)
+        infer_state.init_some_extra_state(self, input_ids, mask)
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
     
     @record_function('_decode')
-    def _decode(self, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
+    def _decode(self, batch_size, total_token_num, max_len_in_batch, input_ids, mask, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state = self.infer_state_class()
         infer_state.is_prefill = False
         infer_state.batch_size = batch_size
@@ -220,7 +221,7 @@ class TpPartBaseModel:
             infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
             copy_kv_index_to_req(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len, infer_state.mem_index)
 
-        infer_state.init_some_extra_state(self, input_ids)
+        infer_state.init_some_extra_state(self, input_ids, mask)
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
     
