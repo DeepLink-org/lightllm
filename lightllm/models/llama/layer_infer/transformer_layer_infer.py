@@ -237,13 +237,13 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
 
         att_m_tensor = token_att_fwd(q.view(calcu_shape1),
-                      infer_state.mem_manager.key_buffer[self.layer_num_],
-                      att_m_tensor1,
-                      infer_state.req_manager.req_to_token_indexs,
-                      infer_state.b_req_idx,
-                      infer_state.b_start_loc,
-                      infer_state.b_seq_len,
-                      infer_state.max_len_in_batch)
+                        infer_state.mem_manager.key_buffer[self.layer_num_],
+                        att_m_tensor1,
+                        infer_state.req_manager.req_to_token_indexs,
+                        infer_state.b_req_idx,
+                        infer_state.b_start_loc,
+                        infer_state.b_seq_len,
+                        infer_state.max_len_in_batch)
         
         o_tensor1 = torch.empty_like(q) if out is None else out
         
@@ -274,13 +274,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         # else:
         #     raise Exception("not support triton version")
         o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
-                                  infer_state.mem_manager.value_buffer[self.layer_num_],
-                                  o_tensor1.view(calcu_shape1),
-                                  infer_state.req_manager.req_to_token_indexs,
-                                  infer_state.b_req_idx,
-                                  infer_state.b_start_loc,
-                                  infer_state.b_seq_len,
-                                  infer_state.other_kv_index)
+                                    infer_state.mem_manager.value_buffer[self.layer_num_],
+                                    o_tensor1.view(calcu_shape1),
+                                    infer_state.req_manager.req_to_token_indexs,
+                                    infer_state.b_req_idx,
+                                    infer_state.b_start_loc,
+                                    infer_state.b_seq_len,
+                                    infer_state.max_len_in_batch,
+                                    infer_state.other_kv_index)
         return o_tensor
     
     # def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
