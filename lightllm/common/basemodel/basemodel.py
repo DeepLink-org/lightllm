@@ -170,6 +170,8 @@ class TpPartBaseModel:
         infer_state.req_manager = self.req_manager
 
         alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num)
+        # test non contiguous mem alloc.
+        # alloc_mem = None
         if alloc_mem is not None:
             infer_state.mem_is_contiguous = True
             infer_state.mem_index = alloc_mem[0]
