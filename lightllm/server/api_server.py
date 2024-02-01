@@ -20,7 +20,7 @@ import asyncio
 import time
 import torch
 import torch_dipu
-import DeepLinkExt
+import deeplink_ext
 import uvloop
 import sys
 import os
