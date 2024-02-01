@@ -20,7 +20,6 @@ import asyncio
 import time
 import torch
 import torch_dipu
-import deeplink_ext
 import uvloop
 import sys
 import os
@@ -43,6 +42,7 @@ from .httpserver.manager import HttpServerManager
 from .detokenization.manager import start_detokenization_process
 from .router.manager import start_router_process
 
+import deeplink_ext.patch_lightllm
 from lightllm.utils.net_utils import alloc_can_use_network_port
 from lightllm.common.configs.config import setting
 from .api_models import (
