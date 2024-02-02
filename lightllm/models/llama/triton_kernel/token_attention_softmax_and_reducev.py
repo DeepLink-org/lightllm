@@ -84,6 +84,19 @@ from torch.profiler import record_function
 #     )
 #     return
 
+# def token_softmax_reducev(logics, v, out, req_to_tokens, b_req_idx, b_start_loc, b_seq_len, max_input_len, other_kv_index):
+#     b_loc = req_to_tokens[b_req_idx]
+#     batch, head, dim = b_loc.shape[0], v.shape[1], v.shape[2]
+#     for i in range(batch):
+#         v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device)]
+#         P = logics[:, b_start_loc[i]:b_start_loc[i] + b_seq_len[i]]
+#         P = P.to(torch.float32).softmax(-1).to(torch.float16).reshape(head, 1, 1, b_seq_len[i]).transpose(0, 1)
+#         V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
+#         out[i, :] = torch.matmul(P, V).view(1, head, dim)
+#     return out
+
+# token_softmax_reducev_fwd = token_softmax_reducev
+
 def step0(Req_to_tokens, B_req_idx):
     b_loc = Req_to_tokens[B_req_idx]
     return b_loc
