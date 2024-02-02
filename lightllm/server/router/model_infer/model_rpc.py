@@ -6,29 +6,29 @@ import traceback
 from datetime import timedelta
 from typing import Dict, List, Tuple
 from transformers.configuration_utils import PretrainedConfig
-from lightllm.models.mixtral.model import MixtralTpPartModel
+# from lightllm.models.mixtral.model import MixtralTpPartModel
 from lightllm.server.router.model_infer.infer_batch import InferBatch
 from rpyc.utils.classic import obtain
 
-from lightllm.models.bloom.model import BloomTpPartModel
+# from lightllm.models.bloom.model import BloomTpPartModel
 from lightllm.models.llama.model import LlamaTpPartModel
-from lightllm.models.llama_wquant.model import LlamaTpPartModelWQuant
-from lightllm.models.llama_awquant.model import LlamaTpPartModelAWQuant
-from lightllm.models.starcoder.model import StarcoderTpPartModel
-from lightllm.models.starcoder_wquant.model import StarcoderTpPartModelWQuant
-from lightllm.models.qwen.model import QWenTpPartModel
-from lightllm.models.qwen_wquant.model import QWenTpPartModelWQuant
-from lightllm.models.baichuan7b.model import Baichuan7bTpPartModel
-from lightllm.models.baichuan13b.model import Baichuan13bTpPartModel
-from lightllm.models.baichuan2_7b.model import Baichuan2_7bTpPartModel
-from lightllm.models.baichuan2_13b.model import Baichuan2_13bTpPartModel
-from lightllm.models.chatglm2.model import ChatGlm2TpPartModel
-from lightllm.models.internlm.model import InternlmTpPartModel
-from lightllm.models.internlm_wquant.model import InternlmTpPartModelWQuant
-from lightllm.models.yi.model import YiTpPartModel
-from lightllm.models.mistral.model import MistralTpPartModel
-from lightllm.models.llava.model import LlavaTpPartModel
-from lightllm.models.qwen_vl.model import QWenVLTpPartModel
+# from lightllm.models.llama_wquant.model import LlamaTpPartModelWQuant
+# from lightllm.models.llama_awquant.model import LlamaTpPartModelAWQuant
+# from lightllm.models.starcoder.model import StarcoderTpPartModel
+# from lightllm.models.starcoder_wquant.model import StarcoderTpPartModelWQuant
+# from lightllm.models.qwen.model import QWenTpPartModel
+# from lightllm.models.qwen_wquant.model import QWenTpPartModelWQuant
+# from lightllm.models.baichuan7b.model import Baichuan7bTpPartModel
+# from lightllm.models.baichuan13b.model import Baichuan13bTpPartModel
+# from lightllm.models.baichuan2_7b.model import Baichuan2_7bTpPartModel
+# from lightllm.models.baichuan2_13b.model import Baichuan2_13bTpPartModel
+# from lightllm.models.chatglm2.model import ChatGlm2TpPartModel
+# from lightllm.models.internlm.model import InternlmTpPartModel
+# from lightllm.models.internlm_wquant.model import InternlmTpPartModelWQuant
+# from lightllm.models.yi.model import YiTpPartModel
+# from lightllm.models.mistral.model import MistralTpPartModel
+# from lightllm.models.llava.model import LlavaTpPartModel
+# from lightllm.models.qwen_vl.model import QWenVLTpPartModel
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
 from .pre_process import prepare_decode_inputs, prepare_prefill_inputs, splitfuse_prepare_decode_inputs

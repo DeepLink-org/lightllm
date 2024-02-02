@@ -2,13 +2,15 @@ import re
 import torch
 from typing import List
 from lightllm.server.router.model_infer.infer_batch import InferBatch
-from lightllm.common.basemodel.triton_kernel.apply_penalty import apply_penalty
+# from lightllm.common.basemodel.triton_kernel.apply_penalty import apply_penalty
+from lightllm.common.basemodel.triton_kernel.apply_penalty import apply_penalty_torch
 
 def sample(logits, reqs):
     logits = logits.contiguous()
     presence_penalties, frequency_penalties, repetition_penalties, temperatures, top_ps, top_ks, p_token_ids, p_token_counts, p_cumsum_seq_len, p_max_len_in_batch = _get_post_sample_tensors(reqs)
 
-    apply_penalty(logits, presence_penalties, frequency_penalties, repetition_penalties, p_token_ids, p_token_counts, p_cumsum_seq_len, p_max_len_in_batch) 
+    # apply_penalty(logits, presence_penalties, frequency_penalties, repetition_penalties, p_token_ids, p_token_counts, p_cumsum_seq_len, p_max_len_in_batch) 
+    apply_penalty_torch(logits, presence_penalties, frequency_penalties, repetition_penalties, p_token_ids, p_token_counts, p_cumsum_seq_len, p_max_len_in_batch) 
     logits.div_(temperatures.view((-1, 1)))
     probs = torch.softmax(logits, dim=-1)
     probs_sort, probs_idx = _top_p_top_k(probs, top_ps, top_ks)
