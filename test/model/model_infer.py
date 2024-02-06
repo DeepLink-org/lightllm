@@ -83,15 +83,18 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             masks = torch.cat(masks, dim=0)
 
             total_token_num = seqlen * batch_size
-            logics = model_part.forward(batch_size,
-                                        total_token_num,
-                                        seqlen,
-                                        test_data[:batch_size * cur_pos],
-                                        masks,
-                                        b_req_idx,
-                                        b_start_loc,
-                                        b_seq_len,
-                                        is_prefill=True)
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True, with_modules=True) as prof:
+                logics = model_part.forward(batch_size,
+                                            total_token_num,
+                                            seqlen,
+                                            test_data[:batch_size * cur_pos],
+                                            masks,
+                                            b_req_idx,
+                                            b_start_loc,
+                                            b_seq_len,
+                                            is_prefill=True)
+            output_path = "/data2/zhoushenglong/torch_profile_prefill_t"
+            prof.export_chrome_trace(output_path)
 
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)

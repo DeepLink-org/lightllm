@@ -305,8 +305,21 @@ class TpPartBaseModel:
     def _context_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
         input_embs = self.pre_infer.context_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        for i in range(self.layers_num):
-            input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])
+        # for i in range(self.layers_num):
+        for i in range(5):
+            # input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])
+            if infer_state.mem_is_contiguous:
+                cache_k = infer_state.mem_manager.key_buffer[i][infer_state.mem_start:infer_state.mem_end, :, :]
+                cache_v = infer_state.mem_manager.value_buffer[i][infer_state.mem_start:infer_state.mem_end, :, :]
+            else:
+                cache_k = infer_state.key_buffer
+                cache_v = infer_state.value_buffer
+            if i == 0:
+                input_embs, out, layer_weight_t= self.layers_infer[i].first_context_forward(input_embs, cache_k, cache_v, infer_state, self.trans_layers_weight[i])
+            elif i == self.layers_num - 1:
+                input_embs = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t, True)
+            else:
+                input_embs, out, layer_weight_t = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t)
         predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
         return predict_logics
 
@@ -315,7 +328,8 @@ class TpPartBaseModel:
     def _token_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
         input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        for i in range(self.layers_num):
+        # for i in range(self.layers_num):
+        for i in range(3):
             input_embs = self.layers_infer[i].token_forward(input_embs, infer_state, self.trans_layers_weight[i])
         predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
         return predict_logics

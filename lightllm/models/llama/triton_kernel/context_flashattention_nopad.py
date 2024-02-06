@@ -347,7 +347,7 @@ def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks
         start = b_start_loc[i]
         end = start + b_seq_len[i]
         with record_function('compiled_torch_context_attention'):
-            out[start:end, :] = _torch_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i])
-            # out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, mask)
+            # out[start:end, :] = _torch_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i])
+            out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i])
     return out
 context_attention_fwd = context_attention
