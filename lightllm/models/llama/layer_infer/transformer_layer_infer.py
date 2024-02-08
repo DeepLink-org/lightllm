@@ -117,7 +117,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                               infer_state.b_start_loc,
                               infer_state.b_seq_len,
                               infer_state.max_len_in_batch)
-        return o_tensor
+        return o_tensor.view(q.shape)
     
     # def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
     #     o_tensor = torch.empty_like(q) if out is None else out
