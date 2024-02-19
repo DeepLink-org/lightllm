@@ -110,7 +110,9 @@ def torch_rotary_emb(x, cos, sin):
     sin = sin.view((seq_len, 1, dim // 2))
     o0 = x0 * cos - x1 * sin
     o1 = x0 * sin + x1 * cos
-    return torch.cat((o0, o1), dim=-1)
+    x.copy_(torch.cat((o0, o1), dim=-1))
+    return
+
 compiled_torch_rotary_emb = torch.compile(torch_rotary_emb, backend='ascendgraph', dynamic=False)
 
 
