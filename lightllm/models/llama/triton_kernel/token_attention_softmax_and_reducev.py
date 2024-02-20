@@ -112,6 +112,8 @@ def step2(x):
 opt_step2 = step2 #torch.compile(step2, backend='ascendgraph', dynamic=False)
 
 def step3(P, V):
+    P = P.to(torch.float32)
+    V = V.to(torch.float32)
     return torch.matmul(P, V)
 opt_step3 = step3 #torch.compile(step3, backend='ascendgraph', dynamic=False)
 

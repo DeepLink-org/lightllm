@@ -12,18 +12,18 @@ is_show_cost_time = False
 def mark_cost_time(func_name):
     def inner_func(func):
         def time_func(*args, **kwargs):
-            if dist.get_rank() in [0, 1] and is_show_cost_time:
-                torch.cuda.synchronize()
+            # if dist.get_rank() in [0, 1] and is_show_cost_time:
+                # torch.cuda.synchronize()
                 start_time = time.time()
                 ans = func(*args, **kwargs)
-                torch.cuda.synchronize()
-                logger.debug(f"{func_name} cost time: {(time.time() - start_time) * 1000}")
+                # torch.cuda.synchronize()
+                # logger.debug(f"{func_name} cost time: {(time.time() - start_time) * 1000}")
                 return ans
-            else:
-                torch.cuda.synchronize()
-                ans = func(*args, **kwargs)
-                torch.cuda.synchronize()
-                return ans
+            # else:
+            #     torch.cuda.synchronize()
+            #     ans = func(*args, **kwargs)
+            #     torch.cuda.synchronize()
+            #     return ans
 
         return time_func
 

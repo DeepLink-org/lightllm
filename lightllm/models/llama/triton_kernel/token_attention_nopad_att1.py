@@ -181,7 +181,7 @@ from torch.profiler import record_function
 #     return out
 # compiled_token_attention = torch.compile(_token_attention, backend='ascendgraph', dynamic=False)
 
-arange_tensor = torch.arange(0, 512).cuda()
+arange_tensor = torch.arange(0, 512) #.cuda()
 
 def step0(Req_to_tokens, B_req_idx):
     b_loc = Req_to_tokens[B_req_idx]
@@ -194,6 +194,8 @@ def step1(b_seq_len, max_input_len, current_arange):
 opt_step1 = step1 #torch.compile(step1, backend='ascendgraph', dynamic=False)
 
 def step2(xq, key, dim):
+    xq = xq.to(torch.float32)
+    key = key.to(torch.float32)
     return torch.matmul(xq, key.transpose(2, 3)) / math.sqrt(dim)
 opt_step2 = step2 #torch.compile(step2, backend='ascendgraph', dynamic=False)
 

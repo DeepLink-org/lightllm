@@ -62,6 +62,13 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
     def post_token_forward(self, lm_head_weight_, final_norm_weight_, last_input, token_num, return_logics=False):
         last_input = self._norm(last_input, final_norm_weight_)
         last_input = rearrange(last_input, "batch embed_dim -> embed_dim batch").contiguous().reshape(-1, token_num)
+        
+        if lm_head_weight_.dtype == torch.float16:
+            lm_head_weight_ = lm_head_weight_.to(torch.float32)
+        if last_input.dtype == torch.float16:
+            last_input = last_input.to(torch.float32)
+        last_input = torch.as_strided(last_input, (4096,1), (1,1))
+
         logic_batch = torch.mm(lm_head_weight_, last_input)
 
         last_input = None

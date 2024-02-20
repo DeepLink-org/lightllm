@@ -95,6 +95,19 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return rmsnorm_forward(input, weight=layer_weight.ffn_norm_weight_, eps=self.eps_)
 
     def real_get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
+        if input.dtype == torch.float16:
+            input = input.to(torch.float32)
+        if layer_weight.q_weight_.dtype == torch.float16:
+            layer_weight.q_weight_ = layer_weight.q_weight_.to(torch.float32)
+        if layer_weight.k_weight_.dtype == torch.float16:
+            layer_weight.k_weight_ = layer_weight.k_weight_.to(torch.float32)
+        if layer_weight.v_weight_.dtype == torch.float16:
+            layer_weight.v_weight_ = layer_weight.v_weight_.to(torch.float32)
+        if cache_k.dtype == torch.float16:
+            cache_k = cache_k.to(torch.float32)
+        if cache_v.dtype == torch.float16:
+            cache_v = cache_v.to(torch.float32)
+        
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
         rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
         torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
@@ -181,6 +194,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     #     return o_tensor
     
     def real_get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
+        if layer_weight.o_weight_.dtype == torch.float16:
+            layer_weight.o_weight_ = layer_weight.o_weight_.to(torch.float32)
         o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
         return o_tensor
     
@@ -188,6 +203,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return self.compiled_get_o(input, infer_state, layer_weight)
 
     def real_ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
+        if input.dtype == torch.float16:
+            input = input.to(torch.float32)
+        if layer_weight.gate_proj.dtype == torch.float16:
+            layer_weight.gate_proj = layer_weight.gate_proj.to(torch.float32)
+        if layer_weight.up_proj.dtype == torch.float16:
+            layer_weight.up_proj = layer_weight.up_proj.to(torch.float32)
+        if layer_weight.down_proj.dtype == torch.float16:
+            layer_weight.down_proj = layer_weight.down_proj.to(torch.float32)
+        
         gate_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.gate_proj)
         torch.nn.functional.silu(gate_out, inplace=True)
         up_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.up_proj)
@@ -234,7 +258,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cpu")
 
         att_m_tensor = token_att_fwd(q.view(calcu_shape1),
                         infer_state.mem_manager.key_buffer[self.layer_num_],

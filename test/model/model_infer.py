@@ -25,22 +25,22 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     rank_id = model_kvargs["tp_rank"]
     world_size = model_kvargs["world_size"]
 
-    dist.init_process_group('nccl', init_method='tcp://127.0.0.1:28765', rank=rank_id, world_size=world_size)
-    torch.cuda.set_device(rank_id)
+    # dist.init_process_group('nccl', init_method='tcp://127.0.0.1:28765', rank=rank_id, world_size=world_size)
+    # torch.cuda.set_device(rank_id)
 
-    import torch.distributed as dist
-    dist.barrier()
-    torch.cuda.empty_cache()
+    # import torch.distributed as dist
+    # dist.barrier()
+    # torch.cuda.empty_cache()
 
     model_part = model_class(model_kvargs)
     # warm up
     test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
     test_data = test_data.reshape(-1)
-    test_data = torch.from_numpy(test_data).cuda()
+    test_data = torch.from_numpy(test_data) #.cuda()
 
     b_req_idx = model_part.req_manager.alloc(batch_size).int()
-    b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
-    b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
+    b_start_loc = torch.zeros(batch_size, dtype=torch.int32)
+    b_seq_len = torch.zeros(batch_size, dtype=torch.int32)
     for i in range(batch_size):
         b_start_loc[i] = i * input_len
         b_seq_len[i] = input_len
@@ -59,11 +59,11 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     predict_ids = predict_ids.detach().cpu().numpy()
 
     for i in range(output_len):
-        b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
+        b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32)
         total_token_num += batch_size
         b_seq_len += 1
         logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
-            predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+            predict_ids).reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
         prob_out = torch.softmax(logics, dim=-1)
         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
         predict_ids = predict_ids.detach().cpu().numpy()
@@ -79,16 +79,16 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     b_start_loc = None
     b_seq_len = None
     
-    dist.barrier()
+    # dist.barrier()
     import time
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
     start_time = time.time()
 
     prefill_start_time = time.time()
 
     b_req_idx = model_part.req_manager.alloc(batch_size).int()
-    b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
-    b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
+    b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cpu")
+    b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cpu")
     for i in range(batch_size):
         b_start_loc[i] = i * input_len
         b_seq_len[i] = input_len
@@ -100,28 +100,28 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
     predict_ids = predict_ids.detach().cpu().numpy()
 
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
     if rank_id == 0:
         print("prefill time cost:", (time.time() - prefill_start_time) * 1000)
 
     for i in range(output_len):
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         step_start = time.time()
-        b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
+        b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cpu")
         total_token_num += batch_size
         b_seq_len += 1
 
         logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
-            predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+            predict_ids).cpu().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
         prob_out = torch.softmax(logics, dim=-1)
         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
         predict_ids = predict_ids.detach().cpu().numpy()
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         if i % 100 == 0 or i == output_len - 1:
             if rank_id == 0:
                 print(i, "step cost time:", (time.time() - step_start) * 1000)
 
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
     end_time = time.time()
 
     if rank_id == 0:
