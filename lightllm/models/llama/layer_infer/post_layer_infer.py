@@ -23,7 +23,7 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
         self.vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["n_embed"]
         
-        self.opt_post_token_forward = torch.compile(self.post_token_forward, backend='ascendgraph', dynamic=False)
+        self.opt_post_token_forward = self.post_token_forward #torch.compile(self.post_token_forward, backend='ascendgraph', dynamic=False)
         return
     
     def _norm(self, input, final_norm_weight_) -> torch.Tensor:

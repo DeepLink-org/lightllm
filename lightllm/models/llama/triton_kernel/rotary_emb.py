@@ -113,7 +113,7 @@ def torch_rotary_emb(x, cos, sin):
     x.copy_(torch.cat((o0, o1), dim=-1))
     return
 
-compiled_torch_rotary_emb = torch.compile(torch_rotary_emb, backend='ascendgraph', dynamic=False)
+compiled_torch_rotary_emb = torch_rotary_emb #torch.compile(torch_rotary_emb, backend='ascendgraph', dynamic=False)
 
 
 rotary_emb_fwd = compiled_torch_rotary_emb
