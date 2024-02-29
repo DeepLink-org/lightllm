@@ -23,8 +23,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         self.tp_o_head_num_ = -1
         self.head_dim_ = -1
         self.embed_dim_ = -1
-        self.compiled_pre_kernel = torch.compile(self.pre_kernel, backend='ascendgraph')
-        self.compiled_post_kernel = torch.compile(self.post_kernel, backend='ascendgraph')
+        self.compiled_pre_kernel = torch.compile(self.pre_kernel, backend='ascendgraph', dynamic=False)
+        self.compiled_post_kernel = torch.compile(self.post_kernel, backend='ascendgraph', dynamic=False)
         return
     
     def _att_norm(self, input, infer_state:InferStateInfo, layer_weight)->torch.Tensor:

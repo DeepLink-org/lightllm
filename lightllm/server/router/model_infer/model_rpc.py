@@ -6,36 +6,36 @@ import traceback
 from datetime import timedelta
 from typing import Dict, List, Tuple
 from transformers.configuration_utils import PretrainedConfig
-from lightllm.models.mixtral.model import MixtralTpPartModel
+# from lightllm.models.mixtral.model import MixtralTpPartModel
 from lightllm.server.router.model_infer.infer_batch import InferBatch
 from rpyc.utils.classic import obtain
 
-from lightllm.models.bloom.model import BloomTpPartModel
+# from lightllm.models.bloom.model import BloomTpPartModel
 from lightllm.models.llama.model import LlamaTpPartModel
-from lightllm.models.llama_wquant.model import LlamaTpPartModelWQuant
-from lightllm.models.llama_awquant.model import LlamaTpPartModelAWQuant
-from lightllm.models.starcoder.model import StarcoderTpPartModel
-from lightllm.models.starcoder_wquant.model import StarcoderTpPartModelWQuant
-from lightllm.models.qwen.model import QWenTpPartModel
-from lightllm.models.qwen_wquant.model import QWenTpPartModelWQuant
-from lightllm.models.baichuan7b.model import Baichuan7bTpPartModel
-from lightllm.models.baichuan13b.model import Baichuan13bTpPartModel
-from lightllm.models.baichuan2_7b.model import Baichuan2_7bTpPartModel
-from lightllm.models.baichuan2_13b.model import Baichuan2_13bTpPartModel
-from lightllm.models.chatglm2.model import ChatGlm2TpPartModel
-from lightllm.models.internlm.model import InternlmTpPartModel
-from lightllm.models.internlm_wquant.model import InternlmTpPartModelWQuant
-from lightllm.models.yi.model import YiTpPartModel
-from lightllm.models.mistral.model import MistralTpPartModel
-from lightllm.models.llava.model import LlavaTpPartModel
-from lightllm.models.qwen_vl.model import QWenVLTpPartModel
+# from lightllm.models.llama_wquant.model import LlamaTpPartModelWQuant
+# from lightllm.models.llama_awquant.model import LlamaTpPartModelAWQuant
+# from lightllm.models.starcoder.model import StarcoderTpPartModel
+# from lightllm.models.starcoder_wquant.model import StarcoderTpPartModelWQuant
+# from lightllm.models.qwen.model import QWenTpPartModel
+# from lightllm.models.qwen_wquant.model import QWenTpPartModelWQuant
+# from lightllm.models.baichuan7b.model import Baichuan7bTpPartModel
+# from lightllm.models.baichuan13b.model import Baichuan13bTpPartModel
+# from lightllm.models.baichuan2_7b.model import Baichuan2_7bTpPartModel
+# from lightllm.models.baichuan2_13b.model import Baichuan2_13bTpPartModel
+# from lightllm.models.chatglm2.model import ChatGlm2TpPartModel
+# from lightllm.models.internlm.model import InternlmTpPartModel
+# from lightllm.models.internlm_wquant.model import InternlmTpPartModelWQuant
+# from lightllm.models.yi.model import YiTpPartModel
+# from lightllm.models.mistral.model import MistralTpPartModel
+# from lightllm.models.llava.model import LlavaTpPartModel
+# from lightllm.models.qwen_vl.model import QWenVLTpPartModel
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
 from .pre_process import prepare_decode_inputs, prepare_prefill_inputs, splitfuse_prepare_decode_inputs
 from .post_process import sample
 from .infer_batch import requests_mapping
 from .infer_batch import InferReq
-from lightllm.server.io_struct import ReqRunStatus
+# from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.log_utils import init_logger
 
 
@@ -85,59 +85,60 @@ class ModelRpcServer(rpyc.Service):
 
         try:
             self.model_type = model_cfg["model_type"]
-            if self.model_type == "bloom":
-                self.model = BloomTpPartModel(model_kvargs)
-            elif self.model_type == "llama":
-                if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
-                    self.model = LlamaTpPartModelWQuant(model_kvargs)
-                elif any('int8_activation_weight' in mode_ for mode_ in self.mode):
-                    self.model = LlamaTpPartModelAWQuant(model_kvargs)
-                else:
-                    self.model = LlamaTpPartModel(model_kvargs)
-            elif self.model_type == "qwen":
-                if "visual" in model_cfg:
-                    self.model = QWenVLTpPartModel(model_kvargs)
-                    self.is_multimodal = True
-                elif any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
-                    self.model = QWenTpPartModelWQuant(model_kvargs)
-                else:
-                    self.model = QWenTpPartModel(model_kvargs)
-            elif self.model_type == "baichuan":
-                if model_cfg['hidden_size'] == 4096:
-                    if model_cfg['architectures'][0] == 'BaichuanForCausalLM':
-                        self.model = Baichuan2_7bTpPartModel(model_kvargs)
-                    else:
-                        self.model = Baichuan7bTpPartModel(model_kvargs)
-                elif model_cfg["hidden_size"] == 5120:
-                    if model_cfg['architectures'][0] == 'BaichuanForCausalLM':
-                        self.model = Baichuan2_13bTpPartModel(model_kvargs)
-                    else:
-                        self.model = Baichuan13bTpPartModel(model_kvargs)
-                else:
-                    raise Exception('can not support baichuan format')
-            elif self.model_type == 'gpt_bigcode':
-                if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
-                    self.model = StarcoderTpPartModelWQuant(model_kvargs)
-                else:
-                    self.model = StarcoderTpPartModel(model_kvargs)
-            elif self.model_type == 'chatglm':
-                self.model = ChatGlm2TpPartModel(model_kvargs)
-            elif self.model_type == 'internlm':
-                if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
-                    self.model = InternlmTpPartModelWQuant(model_kvargs)
-                else:
-                    self.model = InternlmTpPartModel(model_kvargs)
-            elif self.model_type == "Yi":
-                self.model = YiTpPartModel(model_kvargs)
-            elif self.model_type == "mistral":
-                self.model = MistralTpPartModel(model_kvargs)
-            elif self.model_type == "mixtral":
-                self.model = MixtralTpPartModel(model_kvargs)
-            elif self.model_type == "llava":
-                self.model = LlavaTpPartModel(model_kvargs)
-                self.is_multimodal = True
-            else:
-                raise Exception(f"can not support {self.model_type} now")
+            self.model = LlamaTpPartModel(model_kvargs)
+            # if self.model_type == "bloom":
+            #     self.model = BloomTpPartModel(model_kvargs)
+            # elif self.model_type == "llama":
+            #     if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
+            #         self.model = LlamaTpPartModelWQuant(model_kvargs)
+            #     elif any('int8_activation_weight' in mode_ for mode_ in self.mode):
+            #         self.model = LlamaTpPartModelAWQuant(model_kvargs)
+            #     else:
+                    # self.model = LlamaTpPartModel(model_kvargs)
+            # elif self.model_type == "qwen":
+            #     if "visual" in model_cfg:
+            #         self.model = QWenVLTpPartModel(model_kvargs)
+            #         self.is_multimodal = True
+            #     elif any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
+            #         self.model = QWenTpPartModelWQuant(model_kvargs)
+            #     else:
+            #         self.model = QWenTpPartModel(model_kvargs)
+            # elif self.model_type == "baichuan":
+            #     if model_cfg['hidden_size'] == 4096:
+            #         if model_cfg['architectures'][0] == 'BaichuanForCausalLM':
+            #             self.model = Baichuan2_7bTpPartModel(model_kvargs)
+            #         else:
+            #             self.model = Baichuan7bTpPartModel(model_kvargs)
+            #     elif model_cfg["hidden_size"] == 5120:
+            #         if model_cfg['architectures'][0] == 'BaichuanForCausalLM':
+            #             self.model = Baichuan2_13bTpPartModel(model_kvargs)
+            #         else:
+            #             self.model = Baichuan13bTpPartModel(model_kvargs)
+            #     else:
+            #         raise Exception('can not support baichuan format')
+            # elif self.model_type == 'gpt_bigcode':
+            #     if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
+            #         self.model = StarcoderTpPartModelWQuant(model_kvargs)
+            #     else:
+            #         self.model = StarcoderTpPartModel(model_kvargs)
+            # elif self.model_type == 'chatglm':
+            #     self.model = ChatGlm2TpPartModel(model_kvargs)
+            # elif self.model_type == 'internlm':
+            #     if any('int8weight' in mode_ or 'int4weight' in mode_ for mode_ in self.mode):
+            #         self.model = InternlmTpPartModelWQuant(model_kvargs)
+            #     else:
+            #         self.model = InternlmTpPartModel(model_kvargs)
+            # elif self.model_type == "Yi":
+            #     self.model = YiTpPartModel(model_kvargs)
+            # elif self.model_type == "mistral":
+            #     self.model = MistralTpPartModel(model_kvargs)
+            # elif self.model_type == "mixtral":
+            #     self.model = MixtralTpPartModel(model_kvargs)
+            # elif self.model_type == "llava":
+            #     self.model = LlavaTpPartModel(model_kvargs)
+            #     self.is_multimodal = True
+            # else:
+            #     raise Exception(f"can not support {self.model_type} now")
         except Exception as e:
             self.logger.error(f"load model error: {str(e)} {e} {type(e)}")
             import traceback

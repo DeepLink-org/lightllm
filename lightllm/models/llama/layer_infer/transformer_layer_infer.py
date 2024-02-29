@@ -33,9 +33,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
 
-        self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph')
-        self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph')
-        self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph')
+        self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph', dynamic=False)
+        self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph', dynamic=False)
+        self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph', dynamic=False)
         return
     
     def _bind_func(self):
@@ -101,11 +101,17 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     def real_get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
         rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        # print("debug info: ", cache_k.shape, input.shape, self.embed_dim_, layer_weight.k_weight_.shape, flush=True)
+        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_, 
+                 out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        # t =  torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
+        # cache_k = t.reshape(cache_k.shape)
+
         rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
         torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
                     out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        # t = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
+        # cache_v = t.reshape(cache_v.shape)
         return q, cache_k, cache_v
 
     @record_function('transformer_get_qkv')
@@ -123,8 +129,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                               infer_state.b_start_loc,
                               infer_state.b_seq_len,
                               infer_state.max_len_in_batch,
-                              infer_state.masks)
-
+                              infer_state.masks,
+                              infer_state.is_padding)
         return o_tensor
     
     # def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
@@ -259,8 +265,10 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         
         o_tensor1 = torch.empty_like(q) if out is None else out
 
-        att_m_tensor[-1:, :] += infer_state.masks.reshape(-1)
-
+        pass
+        # if infer_state.is_padding:
+        #     att_m_tensor[:, :] += infer_state.masks.reshape(-1)
+        #     pass
         # if triton.__version__ == "2.0.0":
         #     prob = torch.empty_like(att_m_tensor)
         #     token_softmax_fwd(att_m_tensor, infer_state.b_start_loc, infer_state.b_seq_len, prob, infer_state.max_len_in_batch)
@@ -291,13 +299,16 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
             o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
                                     infer_state.mem_manager.value_buffer[self.layer_num_],
                                     o_tensor1.view(calcu_shape1),
+                                    infer_state.is_padding,
+                                    infer_state.masks,
                                     infer_state.req_manager.req_to_token_indexs,
                                     infer_state.b_req_idx,
                                     infer_state.b_start_loc,
                                     infer_state.b_seq_len,
                                     infer_state.max_len_in_batch,
                                     infer_state.other_kv_index)
-        return o_tensor
+        # return o_tensor
+        return o_tensor.view(q.shape)
     
     # def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
     #     batch_size = infer_state.batch_size

@@ -317,15 +317,19 @@ from torch.profiler import record_function
 #     assert torch.allclose(torch_out, o, atol=1e-2, rtol=0)
 
 import torch.nn.functional as F
-def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, mask):
+def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding_mask, is_padding):
     xq = xq.view(bs, seqlen, num_head, head_dim)
     xk = xk.view(bs, seqlen, num_head, head_dim)
     xv = xv.view(bs, seqlen, num_head, head_dim)
-    # mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=0).unsqueeze(0).unsqueeze(0).cuda()
-    # XXX(tangzhiyi):
-    # mask[mask == 0.] = -100000000.0
-    # mask = mask.masked_fill(mask == 0., -100000000.0)
-    # mask = mask.repeat(bs, num_head, 1, 1)
+    mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=1).unsqueeze(0).unsqueeze(0).cuda()
+    mask[mask == 0.] = -100000000.0
+    mask = mask.repeat(bs, num_head, 1, 1)
+    # print(mask[0][0])
+    # print(padding_mask[0])
+    # print(mask.shape, flush=True)
+    # print(padding_mask.shape, flush=True)
+    if is_padding:
+        mask = padding_mask
     keys = xk
     values = xv
     xq = xq.transpose(1, 2)
@@ -337,17 +341,17 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, mask):
     return output
 
 
-compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph')
+compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
 
 
 @record_function('eager_context_attention_kernel')
-def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks):
+def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks, is_padding):
     batch, head, dim = b_start_loc.shape[0], q.shape[1], q.shape[2]
     for i in range(batch):
         start = b_start_loc[i]
         end = start + b_seq_len[i]
         with record_function('compiled_torch_context_attention'):
-            # out[start:end, :] = _torch_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i])
-            out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i])
+            # out[start:end, :] = _torch_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i], is_padding)
+            out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i], is_padding)
     return out
 context_attention_fwd = context_attention

@@ -181,7 +181,7 @@ def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len
         out_loc = b_start_loc[i] + current_arange
         out[:, out_loc] = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
     return out
-compiled_token_attention = torch.compile(_token_attention, backend='ascendgraph')
+compiled_token_attention = torch.compile(_token_attention, backend='ascendgraph', dynamic=False)
 
 def fake_token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len):
     return compiled_token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len, arange_tensor)
