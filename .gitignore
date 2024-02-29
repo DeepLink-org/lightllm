@@ -4,3 +4,8 @@ build
 dist
 *.egg-info
 .idea
+*log*
+core*
+fusion_result.json
+ge_check_op.json
+kernel_meta*
