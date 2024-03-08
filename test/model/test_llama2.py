@@ -20,10 +20,10 @@ def test_llama2_infer():
     test_model_inference(world_size=1,
                          model_dir=model_dir,
                          model_class=LlamaTpPartModel,
-                         batch_size=1,
-                         input_len=4,
-                         output_len=2,
-                         max_prompt_size=5,
+                         batch_size=2,
+                         input_len=128,
+                         output_len=5,
+                         max_prompt_size=4,
                          is_padding=False,
                          mode=[], test_flag=True)
     # print("========================================", flush=True)

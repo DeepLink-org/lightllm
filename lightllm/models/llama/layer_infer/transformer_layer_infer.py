@@ -18,6 +18,8 @@ from lightllm.common.basemodel import TransformerLayerInferTpl
 
 from torch.profiler import record_function
 
+from lightllm import ext_ops
+
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
     """
@@ -36,6 +38,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph', dynamic=False)
         self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph', dynamic=False)
         self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph', dynamic=False)
+        self.compiled_context_attention_kernel= torch.compile(self._context_attention_kernel, backend='ascendgraph', dynamic=False)
+
         return
     
     def _bind_func(self):
@@ -119,8 +123,102 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         q, cache_k, cache_v = self.compiled_get_qkv(input, cache_k, cache_v, infer_state, layer_weight)
         return q, cache_k, cache_v
     
+    def dump_tensor(self, x, name):
+        import pickle
+        with open(f"/data2/zhoushenglong/tmp/{name}.pkl", "wb") as f:
+            if isinstance(x, torch.Tensor):
+                pickle.dump(x.cpu(), f)
+            else:
+                pickle.dump(x, f)
+
+    def torch_rotary_emb(self, x, cos, sin):
+        out = torch.ops.lightllm.rotary_emb.default(x, cos, sin)
+        return out
+    
+    def pre_process(self, input_embdings, infer_state, layer_weight):
+        # att_norm
+        # input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.att_norm_weight_
+        input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+
+        # pre_cache_kv
+        cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
+        cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
+
+        # get_qkv
+        q = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.q_weight_)
+        # rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
+                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        # rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
+        cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
+        torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
+                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        
+        self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
+
+        return q, cache_k, cache_v
+
+    def post_process(self, input_embdings, out, layer_weight):
+        # get_o
+        o = torch.mm(out.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
+        input_embdings.add_(o.view(-1, self.embed_dim_))
+
+        # ffn_norm
+        # input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.ffn_norm_weight_
+        input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+
+        # ffn
+        gate_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_proj)
+        torch.nn.functional.silu(gate_out, inplace=True)
+        up_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.up_proj)
+        input1 = None
+        ffn1_out = gate_out * up_out
+        gate_out, up_out = None, None
+        ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
+        ffn1_out = None
+
+        input1 = None
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
+        input_embdings.add_(ffn2_out.view(-1, self.embed_dim_))
+
+        return input_embdings
+
+    # @record_function('full_context_attention')
+    def full_context_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
+            q, k, v = self.pre_process(input_embding, infer_state, layer_weight)
+
+            batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
+            seqlen = infer_state.b_seq_len
+
+            # q = q.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
+            # k = k.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
+            # v = v.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
+
+            q = q.reshape(batch, -1, num_head * head_dim)
+            k = k.reshape(batch, -1, num_head * head_dim)
+            v = v.reshape(batch, -1, num_head * head_dim)
+        
+            out = torch.ops.lightllm.prompt_attention_inference.default(q, k, v, num_head, seqlen)
+
+            out = self.post_process(input_embding, out, layer_weight)
+
+            return out
+    
     @record_function('transformer_context_attention_kernel')
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
+        # self.dump_tensor(q, "q")
+        # self.dump_tensor(infer_state.mem_manager.key_buffer[self.layer_num_], "all_k")
+        # self.dump_tensor(infer_state.mem_manager.value_buffer[self.layer_num_], "all_v")
+        # self.dump_tensor(infer_state.req_manager.req_to_token_indexs, "Req_to_tokens")
+        # self.dump_tensor(infer_state.b_req_idx, "B_req_idx")
+        # self.dump_tensor(infer_state.b_seq_len, "b_seq_len")
+        # self.dump_tensor(infer_state.max_len_in_batch, "max_input_len")
+        
         o_tensor1 = torch.empty_like(q) if out is None else out
         o_tensor = context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
                               k.view(-1, self.tp_k_head_num_, self.head_dim_),
