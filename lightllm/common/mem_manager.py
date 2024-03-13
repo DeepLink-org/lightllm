@@ -6,6 +6,7 @@ logger = init_logger(__name__)
 
 class MemoryManager:
     def __init__(self, size, dtype, head_num, head_dim, layer_num, always_copy=False):
+        print(f"mem manager init: size={size}, dtype={dtype}, head_num={head_num}, head_dim={head_dim}, layer_num={layer_num}")
         self.size = size        
         self.dtype = dtype
         self.head_num = head_num
@@ -38,7 +39,9 @@ class MemoryManager:
         return select_index
     
     @torch.no_grad()
-    def alloc_contiguous(self, need_size):
+    def alloc_contiguous(self, need_size, full_size=0):
+        ori_need_size = need_size
+        need_size = max(need_size, full_size)
         if self.always_copy:
             return None
         if need_size > self.can_use_mem_size:
@@ -55,7 +58,8 @@ class MemoryManager:
         end = start + need_size
         select_index = self.indexes[start : end]
         self.add_refs(select_index)
-        return select_index, start, end
+        return select_index, start, start+ori_need_size
+        #return select_index, start, end
     
     @torch.no_grad()
     def free(self, free_index):
