@@ -167,7 +167,7 @@ class TpPartBaseModel:
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, 200)
+        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, self.max_seq_length)
         if alloc_mem is not None:
             infer_state.mem_is_contiguous = True
             infer_state.mem_index = alloc_mem[0]
@@ -182,7 +182,7 @@ class TpPartBaseModel:
             infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         
         init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
-                            max_len_in_batch, infer_state.mem_index, 200)
+                            max_len_in_batch, infer_state.mem_index, self.max_seq_length)
 
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._context_forward(input_ids, infer_state)
@@ -208,8 +208,8 @@ class TpPartBaseModel:
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         cur_kv_idx = []
         for i in range(batch_size):
-            cur_kv_idx.append(self.req_manager.req_to_token_indexs[b_req_idx[i]][b_seq_len[i]])
-        infer_state.mem_index = torch.tensor(cur_kv_idx)
+            cur_kv_idx.append(self.req_manager.req_to_token_indexs[b_req_idx[i]][min(b_seq_len[i], self.max_seq_length-1)])
+        infer_state.mem_index = torch.tensor(cur_kv_idx, device='cuda')
 
 
         '''
@@ -313,8 +313,8 @@ class TpPartBaseModel:
         cuda_input_ids = input_ids
         with torch.profiler.record_function("pre-layer"):
             input_embs = self.pre_infer.context_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        for i in range(2):
-        #for i in range(self.layers_num):
+        #for i in range(2):
+        for i in range(self.layers_num):
             with torch.profiler.record_function("trans-layer"):
                 input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])
         with torch.profiler.record_function("post-layer"):
@@ -326,8 +326,8 @@ class TpPartBaseModel:
         cuda_input_ids = input_ids
         with torch.profiler.record_function("pre-layer"):
             input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        #for i in range(self.layers_num):
-        for i in range(2):
+        for i in range(self.layers_num):
+        #for i in range(2):
             with torch.profiler.record_function("trans-layer"):
                 input_embs = self.layers_infer[i].token_forward(input_embs, infer_state, self.trans_layers_weight[i])
         with torch.profiler.record_function("post-layer"):
