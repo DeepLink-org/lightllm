@@ -325,6 +325,7 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim):
     # XXX(tangzhiyi):
     # mask[mask == 0.] = -100000000.0
     mask = mask.masked_fill(mask == 0., -100000000.0)
+    mask = mask.masked_fill(mask == 1., 0.0)
     mask = mask.repeat(bs, num_head, 1, 1)
     keys = xk
     values = xv
