@@ -203,10 +203,14 @@ class TpPartBaseModel:
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        infer_state.mem_is_contiguous = False
-        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        assert(batch_size == 1)
+        infer_state.mem_is_contiguous = True
+        #infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        #infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_req_idx
+        infer_state.mem_start = infer_state.mem_index
+        infer_state.mem_end = infer_state.mem_index + 1
+
 
 
         '''
