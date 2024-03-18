@@ -133,6 +133,6 @@ def _token_softmax_reducev(logics, v, out, req_to_tokens, b_req_idx, b_start_loc
         with record_function('opt_step3'):
             res = opt_step3(P, V)
         out[i, :] = res.view(1, head, dim)
-        return out
+    return out
 
 token_softmax_reducev_fwd = _token_softmax_reducev
