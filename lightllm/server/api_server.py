@@ -19,7 +19,12 @@
 import asyncio
 import time
 import torch
+
+
+from dicp_ext_ops import lightllm
+
 import torch._dynamo
+
 import torch_dipu
 import uvloop
 import sys
@@ -324,9 +329,9 @@ def main():
                         help="the max size for forward requests in the same time")
     parser.add_argument("--tp", type=int, default=1,
                         help="model tp parral size, the default is 1")
-    parser.add_argument("--max_req_input_len", type=int, default=2048,
+    parser.add_argument("--max_req_input_len", type=int, default=64,
                         help="the max value for req input tokens num")
-    parser.add_argument("--max_req_total_len", type=int, default=2048 + 1024,
+    parser.add_argument("--max_req_total_len", type=int, default=64 + 10,
                         help="the max value for req_input_len + req_output_len")
     parser.add_argument("--nccl_port", type=int, default=28765,
                         help="the nccl_port to build a distributed environment for PyTorch")

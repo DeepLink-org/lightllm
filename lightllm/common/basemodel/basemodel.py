@@ -4,6 +4,8 @@ import json
 import torch
 from typing import final
 
+import torch_dipu
+
 from lightllm.common.basemodel.layer_weights.hf_load_utils import load_hf_weights
 from lightllm.common.basemodel.infer_struct import InferStateInfo
 from lightllm.common.basemodel.splitfuse_infer_struct import SplitFuseInferStateInfo
@@ -13,6 +15,8 @@ from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
 # from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
+
+from torch.profiler import record_function
 
 torch.backends.cudnn.enabled = True
 
@@ -53,6 +57,8 @@ class TpPartBaseModel:
         self._init_infer_layer()
         self._init_some_value()
         self._init_custom()
+
+        self.opt_all_layer_token_forward_with_pre_post_process = torch.compile(self.all_layer_token_forward_with_pre_post_process, backend='ascendgraph', dynamic=False)
         return
     
     def _init_config(self):
@@ -94,7 +100,7 @@ class TpPartBaseModel:
     
     def _init_mem_manager(self):
         assert self.config["num_attention_heads"] % self.world_size_ == 0
-        self.mem_manager = MemoryManager(self.max_total_token_num, 
+        self.mem_manager = MemoryManager(self.max_total_token_num,                       
                             dtype=torch.float16,
                             head_num=self.config["num_attention_heads"] // self.world_size_,
                             head_dim=self.config["n_embed"] // self.config["num_attention_heads"],
@@ -166,7 +172,6 @@ class TpPartBaseModel:
 
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
-
         alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num)
         if alloc_mem is not None:
             infer_state.mem_is_contiguous = True
@@ -302,15 +307,48 @@ class TpPartBaseModel:
         for i in range(self.layers_num):
             input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])
         predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        return predict_logics    
+    
+    def all_layer_token_forward(self, input_embs, infer_state, kv_index):
+        for i in range(self.layers_num):
+            input_embs = self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], kv_index)
+        return input_embs
+
+    def all_layer_token_forward_with_post_process(self, input_embs, infer_state, kv_index, batch_size):
+        for i in range(self.layers_num):
+            input_embs = self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], kv_index)
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True)
         return predict_logics
 
-    @final
-    def _token_forward(self, input_ids, infer_state: InferStateInfo):
-        cuda_input_ids = input_ids
+    def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, kv_index, batch_size):
         input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
         for i in range(self.layers_num):
-            input_embs = self.layers_infer[i].token_forward(input_embs, infer_state, self.trans_layers_weight[i])
-        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+            input_embs = self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], kv_index)
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True)
+        return predict_logics
+
+    @record_function('prepare_kv_index')
+    def get_batch_kv_index(self, Req_to_tokens, B_req_idx, b_seq_len, max_input_len, batch):
+        Req_to_tokens = Req_to_tokens.cpu()
+        B_req_idx = B_req_idx.cpu()
+        b_seq_len = b_seq_len.cpu()
+        b_loc = Req_to_tokens[B_req_idx]
+        res = []
+        for i in range(batch):
+            index = max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i])
+            cur_loc = b_loc[i][index]
+            res.append(cur_loc.cuda())
+        return res
+
+    @record_function('_token_forward')
+    @final
+    def _token_forward(self, input_ids, infer_state: InferStateInfo):
+        with record_function('token_forward_with_pre_post_process'):
+            batch_size = infer_state.batch_size
+            cuda_input_ids = input_ids
+            kv_index = self.get_batch_kv_index(infer_state.req_manager.req_to_token_indexs, infer_state.b_req_idx, infer_state.b_seq_len, infer_state.max_len_in_batch, infer_state.batch_size)
+            predict_logics = self.opt_all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, kv_index, batch_size)
+
         return predict_logics
     
     @final

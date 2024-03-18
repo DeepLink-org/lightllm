@@ -4,6 +4,7 @@ import unittest
 
 import torch._dynamo
 import torch
+from dicp_ext_ops import lightllm
 import torch_dipu
 
 torch._dynamo.config.suppress_errors = False
@@ -17,8 +18,8 @@ def test_llama2_infer():
     test_model_inference(world_size=1,
                          model_dir="/tzy/llama-2-7b-chat-hf",
                          model_class=LlamaTpPartModel,
-                         batch_size=2,
-                         input_len=16,
+                         batch_size=1,
+                         input_len=128,
                          output_len=2,
                          mode=[])
     return

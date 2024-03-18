@@ -49,7 +49,7 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
         if not infer_state.is_splitfuse and infer_state.is_prefill and infer_state.return_all_prompt_logprobs:
             total_tokens = infer_state.total_token_num
             return input_embdings, total_tokens
-        
+
         if not infer_state.is_splitfuse and not infer_state.is_prefill:
             batch_size = infer_state.batch_size
             return input_embdings[-batch_size:, :], batch_size
@@ -83,12 +83,21 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
             gather_data = None
             return ans_logics
 
+    def dicp_token_forward(self, input_embdings, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, batch_size, return_logics=False):
+        last_input = input_embdings[-batch_size:, :]
+        token_num = batch_size
+        out = self.post_token_forward(layer_weight.lm_head_weight_, layer_weight.final_norm_weight_, last_input, token_num, return_logics)
+        return out
+
+
     @record_function('post_token_forward')
     def token_forward(self, input_embdings, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, return_logics=False):
         last_input, token_num = self._slice_get_last_input(input_embdings, infer_state)
         with record_function('compiled_post_token_forward'):
             out = self.opt_post_token_forward(layer_weight.lm_head_weight_, layer_weight.final_norm_weight_, last_input, token_num, return_logics)
         return out
+    
+    
     
     @mark_cost_time("splitfuse post forward")
     def splitfuse_forward(self, input_embdings, infer_state: SplitFuseInferStateInfo, layer_weight: BaseLayerWeight, return_logics=False):
