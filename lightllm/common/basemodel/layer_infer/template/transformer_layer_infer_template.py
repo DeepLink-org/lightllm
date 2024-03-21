@@ -86,6 +86,15 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
             dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o.view(-1, self.embed_dim_))
         return
+    
+    @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
+    def _context_ffn(self, input_embdings, infer_state: InferStateInfo, layer_weight):
+        input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
+        ffn_out = self._ffn(input1, infer_state, layer_weight)
+        if self.world_size_ > 1:
+            dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
+        input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
+        return
 
     def post_kernel(self, input_embdings, out, layer_weight):
         # get_o
@@ -108,7 +117,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
 
-        input1 = None
         # if self.world_size_ > 1:
         #     dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn2_out.view(-1, self.embed_dim_))
@@ -179,16 +187,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
                 self.compiled_post_kernel(input_embdings, out, layer_weight)
                 return input_embdings
         return input_embdings, out, layer_weight
-
-    @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
-    def _context_ffn(self, input_embdings, infer_state: InferStateInfo, layer_weight):
-        input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
-        ffn_out = self._ffn(input1, infer_state, layer_weight)
-        input1 = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
-        input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
-        return
 
     # this impl dont to use @mark_cost_time
     def _token_attention(self, input_embding, infer_state: InferStateInfo, layer_weight):

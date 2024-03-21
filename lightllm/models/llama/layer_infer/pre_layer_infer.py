@@ -52,6 +52,7 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
     @record_function('pre_context_forward')
     def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight):
         input_embdings = self.opt_pre_context_forward(input_ids, layer_weight.wte_weight_)
+        # input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_)
         return input_embdings
 
     @record_function('pre_token_forward')
