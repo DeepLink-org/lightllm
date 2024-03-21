@@ -318,6 +318,14 @@ from torch.profiler import record_function
 
 import torch.nn.functional as F
 def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding_mask, is_padding):
+    pass
+    def dump_tensor(x, name):
+        import pickle
+        with open(f"/data2/zhoushenglong/tmp/{name}.pkl", "wb") as f:
+            if isinstance(x, torch.Tensor):
+                pickle.dump(x.cpu(), f)
+            else:
+                pickle.dump(x, f)
     xq = xq.view(bs, seqlen, num_head, head_dim)
     xk = xk.view(bs, seqlen, num_head, head_dim)
     xv = xv.view(bs, seqlen, num_head, head_dim)
@@ -335,23 +343,26 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding
     xq = xq.transpose(1, 2)
     keys = keys.transpose(1, 2)
     values = values.transpose(1, 2)
+    
     scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(head_dim)
     scores = F.softmax(scores.float() + mask, dim=-1).type_as(xq)
     output = torch.matmul(scores, values).transpose(1, 2).contiguous().reshape(-1, num_head, head_dim)
     return output
 
 
-compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
+# compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
 
+compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
 
 @record_function('eager_context_attention_kernel')
 def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks, is_padding):
     batch, head, dim = b_start_loc.shape[0], q.shape[1], q.shape[2]
+
     for i in range(batch):
         start = b_start_loc[i]
         end = start + b_seq_len[i]
         with record_function('compiled_torch_context_attention'):
-            # out[start:end, :] = _torch_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i], is_padding)
             out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i], is_padding)
     return out
+
 context_attention_fwd = context_attention

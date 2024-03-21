@@ -55,7 +55,8 @@ class TpPartBaseModel:
         self._init_some_value()
         self._init_custom()
 
-        self.opt_all_layer_context_forward = torch.compile(self.all_layer_context_forward, backend='ascendgraph', dynamic=False)
+        # self.opt_all_layer_context_forward = torch.compile(self.all_layer_context_forward, backend='ascendgraph', dynamic=False)
+        self.opt_context_forward = torch.compile(self._context_forward, backend='ascendgraph', dynamic=False)
         return
     
     def _init_config(self):
@@ -193,6 +194,11 @@ class TpPartBaseModel:
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
         predict_logics = self._context_forward(input_ids, infer_state)
+        # predict_logics = self.opt_context_forward(input_ids, infer_state)
+
+        # print("===============================================", flush=True)
+        # print(predict_logics, flush=True)
+
         return predict_logics
     
     @record_function('_decode')
@@ -303,21 +309,39 @@ class TpPartBaseModel:
         predict_logics = self._splitfuse_forward(input_ids, infer_state)
         return predict_logics
     
-    def all_layer_context_forward(self, input_embs, infer_state):
-        for i in range(self.layers_num):
-        # for i in range(3):
-            input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-        return input_embs
+    # def all_layer_context_forward(self, input_embs, infer_state):
+    #     for i in range(self.layers_num):
+    #     # for i in range(1):
+    #         # input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
+    #         input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
+    #     # print("===============================================", flush=True)
+    #     # print("input_embs:", input_embs, flush=True)
+    #     # print("===============================================", flush=True)
+    #     return input_embs
 
     @record_function('_context_forward')
     @final
     def _context_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
-        input_embs = self.pre_infer.context_forward(cuda_input_ids, infer_state, self.pre_post_weight)
+        input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight)
 
-        flag = True
-        if flag:
-            input_embs = self.opt_all_layer_context_forward(input_embs, infer_state)
+        # print("===============================================", flush=True)
+        # print("input_embs:", input_embs, flush=True)
+        # print("===============================================", flush=True)
+
+        # flag = True
+        # if flag:
+        # for i in range(self.layers_num):
+        for i in range(32):
+            # input_embs = self.all_layer_context_forward(input_embs, infer_state)
+            # input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
+            input_embs = self.layers_infer[i].opt_full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
+            print("===============================================", flush=True)
+            print("input_embs:", input_embs, flush=True)
+            print("===============================================", flush=True)
+
+        # print("===============================================", flush=True)
+        # print(input_embs, flush=True)
             
         # for i in range(self.layers_num):
         # for i in range(3):
@@ -331,12 +355,14 @@ class TpPartBaseModel:
         #     if i == 0:
         #         input_embs, out, layer_weight_t= self.layers_infer[i].first_context_forward(input_embs, cache_k, cache_v, infer_state, self.trans_layers_weight[i])
         #     # elif i == self.layers_num - 1:
-        #     elif i == 3:
+        #     elif i == 2:
         #         input_embs = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t, True)
         #     else:
         #         input_embs, out, layer_weight_t = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t)
         
-        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        # predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        predict_logics = self.post_infer.opt_token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        
         return predict_logics
 
     @record_function('_token_forward')

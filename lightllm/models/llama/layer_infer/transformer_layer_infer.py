@@ -39,6 +39,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph', dynamic=False)
         self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph', dynamic=False)
         self.compiled_context_attention_kernel= torch.compile(self._context_attention_kernel, backend='ascendgraph', dynamic=False)
+        self.opt_full_context_attention= torch.compile(self.full_context_attention, backend='ascendgraph', dynamic=False)
 
         return
     
@@ -137,24 +138,31 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def pre_process(self, input_embdings, infer_state, layer_weight):
         # att_norm
-        # input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.att_norm_weight_
-        input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
-
+        input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.att_norm_weight_
+        # input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+        
         # pre_cache_kv
         cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
         cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
+        # import pdb; pdb.set_trace()
 
         # get_qkv
         q = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        # rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
-        # rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
-        cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
-        
+        rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        # q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+
+        # torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
+        #             out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        cache_k = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_).view(-1, self.tp_k_head_num_, self.head_dim_)
+        # cache_k.copy_(cache_k_t)
+        rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
+        # cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
+
+        # torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
+        #             out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        cache_v = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_).view(-1, self.tp_v_head_num_, self.head_dim_)
+        # cache_v.copy_(cache_v_t)
+
         self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
 
         return q, cache_k, cache_v
@@ -167,9 +175,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(o.view(-1, self.embed_dim_))
 
+        # print("===============================================", flush=True)
+        # print(input_embdings, flush=True)
+
         # ffn_norm
-        # input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.ffn_norm_weight_
-        input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+        input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.ffn_norm_weight_
+        # input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
 
         # ffn
         gate_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_proj)
@@ -181,10 +192,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
 
-        input1 = None
         # if self.world_size_ > 1:
         #     dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn2_out.view(-1, self.embed_dim_))
+
+        # print("===============================================", flush=True)
+        # print(input_embdings, flush=True)
 
         return input_embdings
 
@@ -192,18 +205,39 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     def full_context_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
             q, k, v = self.pre_process(input_embding, infer_state, layer_weight)
 
+            # print("===============================================", flush=True)
+            # print(q.view(-1, self.tp_q_head_num_ * self.head_dim_))
+            # print(k)
+            # print(v)
+            # print(q.shape, k.shape, v.shape, flush=True)
+            # print("===============================================", flush=True)
+
+            q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
+            # k = k.view(-1, self.tp_k_head_num_, self.head_dim_)
+            # v = v.view(-1, self.tp_v_head_num_, self.head_dim_)
+
             batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
             seqlen = infer_state.b_seq_len
 
-            # q = q.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
-            # k = k.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
-            # v = v.reshape(batch, -1, num_head, head_dim).reshape(batch, -1, num_head * head_dim)
+            # self.dump_tensor(q, "q2")
+            # self.dump_tensor(k, "k2")
+            # self.dump_tensor(v, "v2")
+            # print(batch, flush=True)
+            # print(num_head, flush=True)
+            # print(head_dim, flush=True)
 
-            q = q.reshape(batch, -1, num_head * head_dim)
-            k = k.reshape(batch, -1, num_head * head_dim)
-            v = v.reshape(batch, -1, num_head * head_dim)
-        
-            out = torch.ops.lightllm.prompt_attention_inference.default(q, k, v, num_head, seqlen)
+            # out = torch.ops.lightllm.prompt_attention_inference.default(q, k, v, num_head, seqlen, infer_state.masks)
+            out = torch.ops.lightllm.prompt_attention_inference.default(q.view(batch, -1, num_head * head_dim), 
+                                                                        k.view(batch, -1, num_head * head_dim), 
+                                                                        v.view(batch, -1, num_head * head_dim), 
+                                                                        num_head, seqlen, infer_state.masks)
+            out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
+            
+            # print("===============================================", flush=True)
+            # print(out, flush=True)
+            # print(out.shape, flush=True)
+            # print(input_embding.shape, flush=True)
+            # print("===============================================", flush=True)
 
             out = self.post_process(input_embding, out, layer_weight)
 
@@ -364,8 +398,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         o_tensor1 = torch.empty_like(q) if out is None else out
 
         pass
-        # if infer_state.is_padding:
-        #     att_m_tensor[:, :] += infer_state.masks.reshape(-1)
+        if infer_state.is_padding:
+            att_m_tensor[:, :] += infer_state.masks.reshape(-1)
         #     pass
         # if triton.__version__ == "2.0.0":
         #     prob = torch.empty_like(att_m_tensor)
