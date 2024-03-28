@@ -59,6 +59,11 @@ def apply_penalty_torch(Logits, presence_penalty, freqency_penalty, repetition_p
     cur_batch_end_index = p_cumsum_seq_len[1]
     slice = torch.arange(cur_batch_start_index, cur_batch_end_index, dtype=torch.int64,
                          layout = Logits.layout, device = Logits.device)
+    return apply(Logits, slice, presence_penalty, freqency_penalty, repetition_penalty, p_token_ids, p_token_counts)
+
+
+@torch.no_grad()
+def apply(Logits, slice, presence_penalty, freqency_penalty, repetition_penalty, p_token_ids, p_token_counts):
     cur_token_ids = p_token_ids[slice]
     cur_token_counts = p_token_counts[slice]
     cur_logits = Logits[0].index_select(0, cur_token_ids)
