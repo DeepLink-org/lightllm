@@ -205,7 +205,7 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len
+        infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
 
         '''
         alloc_mem = self.mem_manager.alloc_contiguous(batch_size)
