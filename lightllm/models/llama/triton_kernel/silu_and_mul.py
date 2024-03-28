@@ -50,6 +50,8 @@ def _silu_and_mul_kernel(
 
 
 def silu_and_mul_fwd(input):
+    return torch_silu_and_mul(input)
+    '''
     stride_input_m = input.stride(0)
     stride_input_n = input.stride(1)
     stride_output_m = input.stride(0)
@@ -74,6 +76,7 @@ def silu_and_mul_fwd(input):
         BLOCK_N,
     )
     return input[:, 0 : (input.shape[-1] // 2)]
+    '''
 
 
 def torch_silu_and_mul(input: torch.Tensor):
