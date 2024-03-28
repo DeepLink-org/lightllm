@@ -46,7 +46,24 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         if not infer_state.mem_is_contiguous:
             self._copy_kv_to_mem_cache(cache_k, cache_v, infer_state.mem_index, mem_manager)
             return
-    
+
+    def _post_cache_kv2(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
+        mem_manager = infer_state.mem_manager
+        if not infer_state.mem_is_contiguous:
+            self._copy_kv_to_mem_cache2(cache_k, cache_v, infer_state.int_index_list[0], mem_manager)
+            return
+
+    def _destindex_copy_kv(self, k, dest_loc, out):
+        out = torch.ops.lightllm.copy_with_offset2.default(out, k, dest_loc)
+        return out
+
+
+    def _copy_kv_to_mem_cache2(self, key_buffer, value_buffer, mem_index, mem_manager):
+        self._destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
+        self._destindex_copy_kv(value_buffer, mem_index, mem_manager.value_buffer[self.layer_num_])
+        return
+
+
     def _copy_kv_to_mem_cache(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
         destindex_copy_kv(value_buffer, mem_index, mem_manager.value_buffer[self.layer_num_])
