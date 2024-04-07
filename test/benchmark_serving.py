@@ -104,7 +104,8 @@ def sample_requests(
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             continue
-        if prompt_len > 1024 or prompt_len + output_len > 2048:
+        if prompt_len > 256  or prompt_len + output_len > 512 :
+        #if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
         filtered_dataset.append((prompt, prompt_len, output_len))
@@ -143,7 +144,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate'
+    url = 'http://0.0.0.0:8889/generate'
       
     data = {
         'inputs': prompt,
@@ -179,7 +180,9 @@ async def benchmark(
     request_rate: float,
 ) -> None:
     tasks: List[asyncio.Task] = []
+    # print(f"requeeeeeest:\n{input_requests}")
     async for request in get_request(input_requests, request_rate):
+        # print(f"request:\n{request}")
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
@@ -193,6 +196,9 @@ def main(args: argparse.Namespace):
     np.random.seed(args.seed)
     tokenizer = get_tokenizer(args.tokenizer, "slow")
     input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+
+    input_request = ("How are you? ", 6, 120)
+    input_requests = [input_request for i in range(100)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
