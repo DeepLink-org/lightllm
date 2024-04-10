@@ -8,8 +8,8 @@ from typing import Dict, List, Tuple
 from transformers.configuration_utils import PretrainedConfig
 from lightllm.server.router.model_infer.infer_batch import InferBatch
 from rpyc.utils.classic import obtain
-from lightllm.models.qwen_vl.qwen_visual import QWenVisionTransformer
-from lightllm.models.llava.llava_visual import LlavaVisionModel
+# from lightllm.models.qwen_vl.qwen_visual import QWenVisionTransformer
+# from lightllm.models.llava.llava_visual import LlavaVisionModel
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
 

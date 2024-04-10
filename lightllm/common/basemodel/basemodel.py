@@ -12,7 +12,7 @@ from lightllm.common.req_manager import ReqManager
 from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
-from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
+# from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
 
 torch.backends.cudnn.enabled = True
 
@@ -145,9 +145,11 @@ class TpPartBaseModel:
             multimodal_params=None,
             is_prefill=True):
         if is_prefill:
-            return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            with torch.profiler.record_function("prefill"):
+                return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
         else:
-            return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            with torch.profiler.record_function("decode"):
+                return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
     
     def _prefill(self, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
@@ -309,7 +311,7 @@ class TpPartBaseModel:
         cuda_input_ids = input_ids
         with torch.profiler.record_function("pre-layer"):
             input_embs = self.pre_infer.context_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        #for i in range(2):
+        # for i in range(2):
         for i in range(self.layers_num):
             with torch.profiler.record_function("trans-layer"):
                 input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])

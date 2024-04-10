@@ -35,7 +35,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
             cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
         else:
             cache_k = infer_state.key_buffer
-            cache_v = infer_state.value_buffer 
+            cache_v = infer_state.value_buffer
         return cache_k, cache_v
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:InferStateInfo, layer_weight)->Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

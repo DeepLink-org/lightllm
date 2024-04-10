@@ -165,7 +165,7 @@ async def send_request(
                     chunks.append(chunk)
             output = b"".join(chunks).decode("utf-8")
             output = json.loads(output)
-            
+            print(output)
             if "error" not in output:
                 break
 
@@ -183,16 +183,25 @@ async def benchmark(
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
-        tasks.append(task)
-    await asyncio.gather(*tasks)
+        # tasks.append(task)
+        await asyncio.gather(task)
 
 
 def main(args: argparse.Namespace):
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
-    tokenizer = get_tokenizer(args.tokenizer, "slow")
-    input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+    # tokenizer = get_tokenizer(args.tokenizer, "slow")
+    # input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+
+    input_request = ("How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 128)
+    input_requests = [input_request for i in range(2)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
@@ -220,10 +229,10 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Benchmark the online serving throughput.")
-    parser.add_argument("--dataset", type=str, required=True,
-                        help="Path to the dataset.")
-    parser.add_argument("--tokenizer", type=str, required=True,
-                        help="Name or path of the tokenizer.")
+    # parser.add_argument("--dataset", type=str, required=True,
+    #                     help="Path to the dataset.")
+    # parser.add_argument("--tokenizer", type=str, required=True,
+    #                     help="Name or path of the tokenizer.")
     parser.add_argument("--request-rate", type=float, default=float("inf"),
                         help="Number of requests per second. If this is inf, "
                              "then all the requests are sent at time 0. "
