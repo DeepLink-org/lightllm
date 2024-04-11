@@ -2,6 +2,8 @@ import numpy as np
 from multiprocessing import Queue
 import multiprocessing
 
+from torch.autograd.profiler import record_function
+
 def test_model_inference(world_size, model_dir, model_class, batch_size, input_len, output_len, mode):
     ans_queue = Queue()
     workers = []
@@ -106,12 +108,15 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
 
     if rank_id == 0:
         import torch_dipu
-        path = "/data01/zhaochaoxing/work/pt210/lightllm/tmp/"
+        path = "/data2/chenchiyu/pt211/lightllm/llama_profile_7B_b1_input256_output32/"
         with torch_dipu.profiler.NativeProfile(path, False):
         
             total_token_num = batch_size * input_len
-            logics = model_part.forward(batch_size, total_token_num, input_len, test_data,
-                                                        b_req_idx, b_start_loc, b_seq_len, is_prefill=True)
+            torch.cuda.synchronize()
+            with record_function(f"model_part_prefill"):
+                logics = model_part.forward(batch_size, total_token_num, input_len, test_data,
+                                                            b_req_idx, b_start_loc, b_seq_len, is_prefill=True)
+                torch.cuda.synchronize()
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
@@ -127,8 +132,11 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
                 total_token_num += batch_size
                 b_seq_len += 1
 
-                logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
-                    predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+                torch.cuda.synchronize()
+                with record_function(f"model_part_decode_{i}"):
+                    logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
+                        predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+                    torch.cuda.synchronize()
                 prob_out = torch.softmax(logics, dim=-1)
                 predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
                 predict_ids = predict_ids.detach().cpu().numpy()

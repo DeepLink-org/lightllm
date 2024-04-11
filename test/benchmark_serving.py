@@ -143,7 +143,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate'
+    url = 'http://localhost:8888/generate'
       
     data = {
         'inputs': prompt,
@@ -201,7 +201,7 @@ def main(args: argparse.Namespace):
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 128)
-    input_requests = [input_request for i in range(2)]
+    input_requests = [input_request for i in range(args.num_prompts)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
@@ -241,5 +241,5 @@ if __name__ == "__main__":
     parser.add_argument("--num-prompts", type=int, default=1000,
                     help="Number of prompts to process.")
     parser.add_argument("--seed", type=int, default=0)
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     main(args)
