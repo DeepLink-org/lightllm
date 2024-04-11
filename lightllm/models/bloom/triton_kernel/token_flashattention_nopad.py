@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from .token_attention_nopad_att1 import token_att_fwd
 from .token_attention_nopad_softmax import token_softmax_fwd
 from .token_attention_nopad_reduceV import token_att_fwd2
+import torch_npu
 
 
 @triton.jit
@@ -128,7 +129,7 @@ def token_attention_fwd(q, k, v, o, alibi, req_to_tokens, b_req_idx, b_start_loc
     batch_size = b_seq_len.shape[0]
     calcu_shape1 = (batch_size, head_num, k.shape[2])
 
-    att_m_tensor = torch.empty((head_num, total_token_num), dtype=q.dtype, device="cuda")
+    att_m_tensor = torch.empty((head_num, total_token_num), dtype=q.dtype, device="npu")
 
     token_att_fwd(q.view(calcu_shape1),
                   k,

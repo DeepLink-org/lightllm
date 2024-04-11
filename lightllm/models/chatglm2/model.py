@@ -8,6 +8,7 @@ from lightllm.models.chatglm2.layer_weights.pre_and_post_layer_weight import Cha
 from lightllm.models.llama.model import LlamaTpPartModel
 from lightllm.common.build_utils import repair_config
 from lightllm.utils.log_utils import init_logger
+import torch_npu
 
 logger = init_logger(__name__)
 
@@ -70,6 +71,6 @@ class ChatGlm2TpPartModel(LlamaTpPartModel):
         t = torch.arange(max_seq_len + 1024 * 64, device="cpu", dtype=torch.float32) / rope_scaling_factor
         freqs = torch.outer(t, inv_freq)
 
-        self._cos_cached = torch.cos(freqs).to(torch.float16).cuda()
-        self._sin_cached = torch.sin(freqs).to(torch.float16).cuda()
+        self._cos_cached = torch.cos(freqs).to(torch.float16).npu()
+        self._sin_cached = torch.sin(freqs).to(torch.float16).npu()
         return

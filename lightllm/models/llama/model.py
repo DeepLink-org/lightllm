@@ -14,6 +14,7 @@ from lightllm.models.llama.splitfuse_infer_struct import LlamaSplitFuseInferStat
 from lightllm.common.basemodel import TpPartBaseModel
 from lightllm.common.mem_utils import select_mem_manager_class
 from lightllm.utils.log_utils import init_logger
+import torch_npu
 
 logger = init_logger(__name__)
 
@@ -131,8 +132,8 @@ class LlamaTpPartModel(TpPartBaseModel):
         t = torch.arange(max_seq_len + 1024 * 64, device="cpu", dtype=torch.float32) / rope_scaling_factor
         freqs = torch.outer(t, inv_freq)
 
-        self._cos_cached = torch.cos(freqs).to(torch.float16).cuda()
-        self._sin_cached = torch.sin(freqs).to(torch.float16).cuda()
+        self._cos_cached = torch.cos(freqs).to(torch.float16).npu()
+        self._sin_cached = torch.sin(freqs).to(torch.float16).npu()
         return
 
     def _init_to_get_dynamic_ntk_rotary(self):
@@ -140,22 +141,22 @@ class LlamaTpPartModel(TpPartBaseModel):
         base = self.config.get("rope_theta", 10000.0)
         scaling_factor = self.config.get("rope_scaling", {}).get("factor", 1.0)
         max_seq_len = 32 * max_position_embeddings # 64k
-        self._cos_cached = torch.zeros((max_seq_len, self.head_dim_ // 2), dtype=torch.float16, device="cuda")
-        self._sin_cached = torch.zeros((max_seq_len, self.head_dim_ // 2), dtype=torch.float16, device="cuda")
+        self._cos_cached = torch.zeros((max_seq_len, self.head_dim_ // 2), dtype=torch.float16, device="npu")
+        self._sin_cached = torch.zeros((max_seq_len, self.head_dim_ // 2), dtype=torch.float16, device="npu")
         
         inv_freq = 1.0 / (base ** (torch.arange(0, self.head_dim_, 2, device="cpu", dtype=torch.float32) / self.head_dim_))
         t = torch.arange(max_position_embeddings, device="cpu", dtype=torch.float32)
         freqs = torch.outer(t, inv_freq)
-        self._cos_cached[0:max_position_embeddings, :] = torch.cos(freqs).to(torch.float16).cuda()
-        self._sin_cached[0:max_position_embeddings, :] = torch.sin(freqs).to(torch.float16).cuda()
+        self._cos_cached[0:max_position_embeddings, :] = torch.cos(freqs).to(torch.float16).npu()
+        self._sin_cached[0:max_position_embeddings, :] = torch.sin(freqs).to(torch.float16).npu()
 
         for seq_loc_index in range(max_position_embeddings, max_seq_len, 1):
             new_base = base * ((scaling_factor * (seq_loc_index + 1) / max_position_embeddings) -(scaling_factor - 1)) ** (self.head_dim_ / (self.head_dim_ - 2))
             inv_freq = 1.0 / (new_base ** (torch.arange(0, self.head_dim_, 2, device="cpu", dtype=torch.float32) / self.head_dim_))
             t = torch.tensor([seq_loc_index,], device="cpu", dtype=torch.float32)
             freqs = torch.outer(t, inv_freq)
-            self._cos_cached[seq_loc_index:seq_loc_index + 1, :] = torch.cos(freqs).to(torch.float16).cuda()
-            self._sin_cached[seq_loc_index:seq_loc_index + 1, :] = torch.sin(freqs).to(torch.float16).cuda()
+            self._cos_cached[seq_loc_index:seq_loc_index + 1, :] = torch.cos(freqs).to(torch.float16).npu()
+            self._sin_cached[seq_loc_index:seq_loc_index + 1, :] = torch.sin(freqs).to(torch.float16).npu()
         return
 
     def _init_to_get_yarn_rotary(self):
@@ -170,24 +171,24 @@ class LlamaTpPartModel(TpPartBaseModel):
         beta_fast = 32.0
         beta_slow = 1.0
 
-        pos_freqs = base ** (torch.arange(0, dim, 2).float().cuda() / dim)
+        pos_freqs = base ** (torch.arange(0, dim, 2).float().npu() / dim)
         inv_freq_extrapolation = 1.0 / pos_freqs
         inv_freq_interpolation = 1.0 / (scale * pos_freqs)
 
         low, high = find_correction_range(beta_fast, beta_slow, dim, base, original_max_position_embeddings)
-        inv_freq_mask = (1 - linear_ramp_mask(low, high, dim // 2).float().cuda()) * extrapolation_factor # Get n-d rotational scaling corrected for extrapolation
+        inv_freq_mask = (1 - linear_ramp_mask(low, high, dim // 2).float().npu()) * extrapolation_factor # Get n-d rotational scaling corrected for extrapolation
         inv_freq = inv_freq_interpolation * (1 - inv_freq_mask) + inv_freq_extrapolation * inv_freq_mask
 
         mscale = float(get_mscale(scale) * attn_factor) # Get n-d magnitude scaling corrected for interpolation
 
         # Build here to make `torch.jit.trace` work.
         max_seq_len_cached = max_position_embeddings
-        t = torch.arange(max_seq_len_cached, device="cuda", dtype=torch.float32)
+        t = torch.arange(max_seq_len_cached, device="npu", dtype=torch.float32)
         freqs = torch.einsum("i,j->ij", t, inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self._cos_cached = emb.cos().to(torch.float16).cuda() * mscale
-        self._sin_cached = emb.sin().to(torch.float16).cuda() * mscale
+        self._cos_cached = emb.cos().to(torch.float16).npu() * mscale
+        self._sin_cached = emb.sin().to(torch.float16).npu() * mscale
 
         return
 

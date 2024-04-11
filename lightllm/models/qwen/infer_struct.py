@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from lightllm.common.basemodel import InferStateInfo
+import torch_npu
 
 class QwenInferStateInfo(InferStateInfo):
     def __init__(self):
@@ -15,7 +16,7 @@ class QwenInferStateInfo(InferStateInfo):
             b_start_loc_numpy = self.b_start_loc.cpu().numpy() 
             b_seq_len_numpy = self.b_seq_len.cpu().numpy()
             position_ids = torch.from_numpy(np.concatenate([np.arange(0, b_seq_len_numpy[i])
-                                            for i in range(len(b_seq_len_numpy))], axis=0)).cuda()
+                                            for i in range(len(b_seq_len_numpy))], axis=0)).npu()
             self.position_sin = []
             self.position_cos = []
             infer_ntk_id = torch.clamp(torch.ceil(torch.log2(self.b_seq_len / model.config.get("seq_length", 2048)) + 1), 0, model.max_ntk_alpha).long()

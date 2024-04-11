@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from io import BytesIO
 import multiprocessing.shared_memory as shm
+import torch_npu
 
 
 def tensor2bytes(t):
@@ -14,7 +15,7 @@ def tensor2bytes(t):
 
 
 def bytes2tensor(b):
-    return torch.from_numpy(np.frombuffer(b, dtype=np.float16)).cuda()
+    return torch.from_numpy(np.frombuffer(b, dtype=np.float16)).npu()
     # return torch.load(BytesIO(b))
 
 

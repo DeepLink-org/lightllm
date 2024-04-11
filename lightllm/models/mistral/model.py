@@ -14,6 +14,7 @@ from lightllm.models.llama.layer_infer.transformer_layer_infer import LlamaTrans
 from lightllm.common.mem_utils import MemoryManager
 from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
+import torch_npu
 
 class MistralTpPartModel(TpPartBaseModel):
     # weight class
@@ -79,7 +80,7 @@ class MistralTpPartModel(TpPartBaseModel):
         t = torch.arange(max_seq_len + 1024 * 64, device="cpu", dtype=torch.float32) / rope_scaling_factor
         freqs = torch.outer(t, inv_freq)
 
-        self._cos_cached = torch.cos(freqs).to(torch.float16).cuda()
-        self._sin_cached = torch.sin(freqs).to(torch.float16).cuda()
+        self._cos_cached = torch.cos(freqs).to(torch.float16).npu()
+        self._sin_cached = torch.sin(freqs).to(torch.float16).npu()
         return
     

@@ -1,4 +1,5 @@
 import torch
+import torch_npu
 
 def token_decode_attention_flash_decoding(q, infer_state, q_head_num, head_dim, cache_k, cache_v, out=None):
     BLOCK_SEQ = 256
@@ -17,12 +18,12 @@ def token_decode_attention_flash_decoding(q, infer_state, q_head_num, head_dim, 
                                         max_len_in_batch // BLOCK_SEQ + 1, 
                                         head_dim], 
                                         dtype=torch.float16, 
-                                        device="cuda")
+                                        device="npu")
         infer_state.mid_o_logexpsum = torch.empty([batch_size, 
                                         q_head_num,
                                         max_len_in_batch // BLOCK_SEQ + 1], 
                                         dtype=torch.float16, 
-                                        device="cuda")
+                                        device="npu")
         
     mid_o = infer_state.mid_o
     mid_o_logexpsum = infer_state.mid_o_logexpsum

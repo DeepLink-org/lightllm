@@ -4,6 +4,7 @@ import triton
 import triton.language as tl
 import math
 import torch.nn.functional as F
+import torch_npu
 
 if triton.__version__ >= "2.1.0":
     @triton.jit
@@ -254,7 +255,7 @@ def torch_att(xq, xk, xv, bs, seqlen, num_head, head_dim):
     xq = xq.view(bs, seqlen, num_head, head_dim)
     xk = xk.view(bs, seqlen, num_head, head_dim)
     xv = xv.view(bs, seqlen, num_head, head_dim)
-    mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=0).unsqueeze(0).unsqueeze(0).cuda()
+    mask = torch.tril(torch.ones(seqlen, seqlen), diagonal=0).unsqueeze(0).unsqueeze(0).npu()
     mask[mask == 0.] = -100000000.0
     mask = mask.repeat(bs, num_head, 1, 1)
     keys = xk
@@ -275,16 +276,16 @@ def test():
     Z, H, N_CTX, D_HEAD = 4, 10, 1024, 128
     dtype = torch.float16
     Z = 3
-    q = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.1, std=0.2)
-    k = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.4, std=0.2)
-    v = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.3, std=0.2)
-    o = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.3, std=0.2)
-    alibi = torch.zeros((H,), dtype=torch.float32, device="cuda")
+    q = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="npu").normal_(mean=0.1, std=0.2)
+    k = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="npu").normal_(mean=0.4, std=0.2)
+    v = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="npu").normal_(mean=0.3, std=0.2)
+    o = torch.empty((Z * N_CTX, H, D_HEAD), dtype=dtype, device="npu").normal_(mean=0.3, std=0.2)
+    alibi = torch.zeros((H,), dtype=torch.float32, device="npu")
 
     max_input_len = N_CTX
     Z = 4
-    b_start_loc = torch.zeros((Z,), dtype=torch.int32, device="cuda")
-    b_seq_len = torch.ones((Z,), dtype=torch.int32, device="cuda")
+    b_start_loc = torch.zeros((Z,), dtype=torch.int32, device="npu")
+    b_seq_len = torch.ones((Z,), dtype=torch.int32, device="npu")
 
     b_seq_len[0] = 512
     b_seq_len[1] = 1024

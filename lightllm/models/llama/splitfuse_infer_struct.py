@@ -3,6 +3,7 @@ import numpy as np
 from lightllm.common.basemodel import SplitFuseInferStateInfo
 from lightllm.common.req_manager import ReqManager
 from .infer_struct import LlamaInferStateInfo
+import torch_npu
 
 class LlamaSplitFuseInferStateInfo(SplitFuseInferStateInfo):
     
@@ -24,7 +25,7 @@ class LlamaSplitFuseInferStateInfo(SplitFuseInferStateInfo):
             b_start_numpy = b_seq_len_numpy - b_split_len_numpy
             position_ids.extend([np.arange(b_start_numpy[i], b_seq_len_numpy[i]) for i in range(len(b_seq_len_numpy))])
             
-        position_ids = torch.from_numpy(np.concatenate(position_ids, axis=0)).cuda().view(-1)
+        position_ids = torch.from_numpy(np.concatenate(position_ids, axis=0)).npu().view(-1)
         self.position_cos = torch.index_select(model._cos_cached, 0, position_ids).view(position_ids.shape[0], -1)
         self.position_sin = torch.index_select(model._sin_cached, 0, position_ids).view(position_ids.shape[0], -1)
 

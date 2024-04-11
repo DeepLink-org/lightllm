@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from lightllm.common.basemodel import PreAndPostLayerWeight
 from torch import nn
+import torch_npu
 
 
 class Baichuan2_7bPreAndPostLayerWeight(PreAndPostLayerWeight):
@@ -22,7 +23,7 @@ class Baichuan2_7bPreAndPostLayerWeight(PreAndPostLayerWeight):
         if 'lm_head.weight' in weights:
             # print(weights['lm_head.weight'].shape)
             self.lm_head_weight_ = nn.functional.normalize(weights['lm_head.weight'].to(
-                torch.float16).cuda())[split_vob_size * self.tp_rank_:split_vob_size * (self.tp_rank_ + 1), :]
+                torch.float16).npu())[split_vob_size * self.tp_rank_:split_vob_size * (self.tp_rank_ + 1), :]
         if 'model.norm.weight' in weights:
             self.final_norm_weight_ = self._cuda(weights['model.norm.weight'])
 

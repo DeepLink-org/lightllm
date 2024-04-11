@@ -11,6 +11,7 @@ from .infer_struct import QwenInferStateInfo
 
 from lightllm.models.llama.model import LlamaTpPartModel
 from lightllm.common.build_utils import repair_config
+import torch_npu
 
 
 class QWenTpPartModel(LlamaTpPartModel):
@@ -78,8 +79,8 @@ class QWenTpPartModel(LlamaTpPartModel):
 
             t = torch.arange(total_seq_len_supported + 64 * 1024, device="cpu", dtype=torch.float32)
             freqs = torch.outer(t, inv_freq)
-            self._cos_cached.append(torch.cos(freqs).to(torch.float16).cuda())
-            self._sin_cached.append(torch.sin(freqs).to(torch.float16).cuda())
+            self._cos_cached.append(torch.cos(freqs).to(torch.float16).npu())
+            self._sin_cached.append(torch.sin(freqs).to(torch.float16).npu())
 
         self._cos_cached = torch.stack(self._cos_cached, dim=0).contiguous()
         self._sin_cached = torch.stack(self._sin_cached, dim=0).contiguous()
@@ -92,5 +93,5 @@ class QWenTpPartModel(LlamaTpPartModel):
             math.log(i, seq_len) if i > seq_len else 1
             for i in range(1, total_seq_len_supported + 64 * 1024 + 1)
         ]
-        self.logn_tensor = torch.tensor(logn_list).cuda()
+        self.logn_tensor = torch.tensor(logn_list).npu()
         return

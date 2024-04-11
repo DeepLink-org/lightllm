@@ -14,6 +14,7 @@ from lightllm.models.mistral.triton_kernel.token_attention_nopad_reduceV import 
 from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
+import torch_npu
 
 
 class MistralTransformerLayerInfer(LlamaTransformerLayerInfer):
@@ -46,7 +47,7 @@ class MistralTransformerLayerInfer(LlamaTransformerLayerInfer):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+        att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="npu")
 
         token_att_fwd(q.view(calcu_shape1),
                       infer_state.mem_manager.key_buffer[self.layer_num_],

@@ -1,4 +1,5 @@
 import torch
+import torch_npu
 
 def quantize_int4_ppl(weight, group_size=128, tp_rank=8):
     """
@@ -7,7 +8,7 @@ def quantize_int4_ppl(weight, group_size=128, tp_rank=8):
         qweight: [K, N//8] int32 (packed int4*8) new pack_order
         q_scale: [K//group_size, N] int32
     """
-    weight = weight.to(dtype=torch.float16).transpose(0, 1).contiguous().cuda(tp_rank)
+    weight = weight.to(dtype=torch.float16).transpose(0, 1).contiguous().npu(tp_rank)
     from lightllm_ppl_int4_kernel import int4_weight_encode
     qweight_new, q_scale = int4_weight_encode(weight, group_size)
     return qweight_new, q_scale

@@ -2,6 +2,7 @@ import torch
 
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.autotune(
@@ -105,23 +106,23 @@ def test_int8(M, K, N):
     int_b, b_scale = quantize_int8(b)
     for _ in range(10):
         triton_output = matmul_dequantize_int8(a, int_b, b_scale.unsqueeze(0))
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         triton_output = matmul_dequantize_int8(a, int_b, b_scale.unsqueeze(0))
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     triton_time = t2 - t1
     print("Triton time cost", (t2 - t1))
     for _ in range(10):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     torch_time = t2 - t1
     print("Torch time cost", (t2 - t1))

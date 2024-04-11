@@ -98,6 +98,7 @@ from torch.profiler import record_function
 # token_softmax_reducev_fwd = token_softmax_reducev
 
 def step0(Req_to_tokens, B_req_idx):
+    B_req_idx = B_req_idx.to(torch.long)
     b_loc = Req_to_tokens[B_req_idx]
     return b_loc
 opt_step0 = step0 #torch.compile(step0, backend='ascendgraph', dynamic=False)
@@ -129,6 +130,7 @@ def _token_softmax_reducev(logics, v, out, req_to_tokens, b_req_idx, b_start_loc
         with record_function('opt_step2'):
             P = opt_step2(P)
         P = P.reshape(head, 1, 1, b_seq_len[i]).transpose(0, 1)
+        v_loc = v_loc.to(torch.long)
         V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2).clone()
         with record_function('opt_step3'):
             res = opt_step3(P, V)

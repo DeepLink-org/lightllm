@@ -5,6 +5,7 @@ import os
 from PIL import Image
 from typing import List, Union
 from transformers import CLIPVisionModel, CLIPImageProcessor
+import torch_npu
 
 
 class LlavaVisionModel:
@@ -44,9 +45,9 @@ class LlavaVisionModel:
         assert 'model.mm_projector.2.bias' in self.projector_weights
 
     def cuda(self):
-        self.vision_tower = self.vision_tower.cuda()
+        self.vision_tower = self.vision_tower.npu()
         for k, v in self.projector_weights.items():
-            self.projector_weights[k] = v.cuda()
+            self.projector_weights[k] = v.npu()
         self.device = torch.device('cuda')
         return self
 

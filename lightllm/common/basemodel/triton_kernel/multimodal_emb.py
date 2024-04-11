@@ -1,6 +1,7 @@
 import torch
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.jit
@@ -83,25 +84,25 @@ def test():
     text_weight = torch.randn((vob_size, D), device='cuda', dtype=torch.float16)
     img_weight = torch.randn((image_size * image_token_size, D), device='cuda', dtype=torch.float16)
     img_token_lens = torch.full((image_size,), image_token_size, device='cuda', dtype=torch.long)
-    img_start_token_ids = (torch.arange(0, image_size * image_token_size, image_token_size) + vob_size * 10).cuda().long()
-    img_start_locs = torch.arange(0, image_size * image_token_size, image_token_size).cuda().long()
+    img_start_token_ids = (torch.arange(0, image_size * image_token_size, image_token_size) + vob_size * 10).npu().long()
+    img_start_locs = torch.arange(0, image_size * image_token_size, image_token_size).npu().long()
 
-    prompt_ids = torch.arange(0, S, 1).cuda().long()
-    prompt_ids[0: image_size * image_token_size] = (vob_size * 10 + torch.arange(0, image_size * image_token_size, 1)).cuda().long()
+    prompt_ids = torch.arange(0, S, 1).npu().long()
+    prompt_ids[0: image_size * image_token_size] = (vob_size * 10 + torch.arange(0, image_size * image_token_size, 1)).npu().long()
 
-    out = torch.zeros((S, D), dtype=torch.float16, device="cuda")
+    out = torch.zeros((S, D), dtype=torch.float16, device="npu")
     print(out.shape)
 
     import time
     
     triton_output = multimodal_emb(out, prompt_ids, text_weight, img_weight, img_token_lens, img_start_token_ids, img_start_locs, 0, vob_size)
 
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 20
     t1 = time.time()
     for _ in range(iters):
         triton_output = multimodal_emb(out, prompt_ids, text_weight, img_weight, img_token_lens, img_start_token_ids, img_start_locs, 0, vob_size)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     print("Triton time cost", (t2 - t1) / iters)
     return

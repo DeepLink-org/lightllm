@@ -4,6 +4,7 @@ from torch.profiler import record_function
 # import triton
 # import triton.language as tl
 # import math
+import torch_npu
 
 
 # @triton.jit
@@ -181,9 +182,10 @@ from torch.profiler import record_function
 #     return out
 # compiled_token_attention = torch.compile(_token_attention, backend='ascendgraph', dynamic=False)
 
-arange_tensor = torch.arange(0, 512).cuda()
+arange_tensor = torch.arange(0, 512).npu()
 
 def step0(Req_to_tokens, B_req_idx):
+    B_req_idx = B_req_idx.to(torch.long)
     b_loc = Req_to_tokens[B_req_idx]
     return b_loc
 opt_step0 = step0 #torch.compile(step0, backend='ascendgraph', dynamic=False)
@@ -207,6 +209,7 @@ opt_step3 = step3 #torch.compile(step3, backend='ascendgraph', dynamic=False)
 def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len, max_input_len):
     with record_function('opt_step0'):
         b_loc = opt_step0(Req_to_tokens, B_req_idx)
+    B_req_idx = B_req_idx.to(torch.long)
     b_loc = Req_to_tokens[B_req_idx]
     batch, head, dim = b_loc.shape[0], q.shape[1], q.shape[2]
     xq = q.view(batch, 1, head, dim).transpose(1, 2)
@@ -215,6 +218,7 @@ def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len
         with record_function('opt_step1'):
             k_loc_index = opt_step1(b_seq_len[i], max_input_len, current_arange)
         k_loc = b_loc[i][k_loc_index]
+        k_loc = k_loc.to(torch.long)
         key = k[k_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
         with record_function('opt_step2'):
             res = opt_step2(xq[i, :], key, dim)

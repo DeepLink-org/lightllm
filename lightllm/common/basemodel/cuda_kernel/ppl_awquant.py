@@ -1,4 +1,5 @@
 import torch
+import torch_npu
 
 def CONTIGUOUS_TENSOR(tensor: torch.Tensor):
     """ Helper function """
@@ -30,7 +31,7 @@ def matmul_i8_i32_ppl(
         CONTIGUOUS_TENSOR(A), CONTIGUOUS_TENSOR(B), selected_algo, split_k_slices)
 
 def dynamic_channelwise_quant_fp16_i8_ppl(x: torch.Tensor, channel_idx=0, tp_rank=8):
-    x = x.transpose(0, 1).to(dtype=torch.float16).cuda(tp_rank)
+    x = x.transpose(0, 1).to(dtype=torch.float16).npu(tp_rank)
     from lightllm_ppl_int8_kernel import QuantizeTensor_LG
     assert channel_idx < x.ndim, "channel index out of range"
     # reorder channel to first dimension, then invoke group quantize impl.

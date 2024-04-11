@@ -64,8 +64,8 @@ class ModelRpcServer(rpyc.Service):
         weight_dir = kvargs["weight_dir"]
         max_total_token_num = kvargs["max_total_token_num"]
 
-        dist.init_process_group('nccl', init_method=f'tcp://127.0.0.1:{kvargs["nccl_port"]}', rank=self.tp_rank, world_size=world_size)
-        torch.cuda.set_device(self.tp_rank)
+        dist.init_process_group('hccl', init_method=f'tcp://127.0.0.1:28765', rank=self.tp_rank, world_size=world_size)
+        torch.npu.set_device(self.tp_rank)
 
         model_cfg, _ = PretrainedConfig.get_config_dict(
             weight_dir

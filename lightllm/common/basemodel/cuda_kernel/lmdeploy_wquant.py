@@ -1,4 +1,5 @@
 import torch
+import torch_npu
 
 @torch.no_grad()
 def quantize_int4_lmdeploy(weight, group_size=128, tp_rank=0, pack_order=[0, 2, 4, 6, 1, 3, 5, 7]):
@@ -15,7 +16,7 @@ def quantize_int4_lmdeploy(weight, group_size=128, tp_rank=0, pack_order=[0, 2, 
     assert K % 8 == 0 and N % 8 == 0, "K={} N={}".format(K, N)
     assert K % group_size == 0, "K={} N={}".format(K, N)
 
-    weight = weight.contiguous().view(-1, group_size).cuda(tp_rank)
+    weight = weight.contiguous().view(-1, group_size).npu(tp_rank)
     weight_max = weight.amax(-1, keepdim=True)
     weight_max = torch.where(weight_max < 0, 0, weight_max)
     weight_min = weight.amin(-1, keepdim=True)
@@ -84,7 +85,7 @@ def matmul_dequantize_int4_lmdeploy(
     M, K = x.shape
     N = qweight.shape[1] * 8
     if output is None:
-        output = torch.empty((M, N), dtype=x.dtype, device="cuda")
+        output = torch.empty((M, N), dtype=x.dtype, device="npu")
     from lightllm_lmdeploy_kernel import int4fp16_matmul
     int4fp16_matmul(output, qweight, x, scale_zeros, N, M, K, group_size, has_silu)
     return output

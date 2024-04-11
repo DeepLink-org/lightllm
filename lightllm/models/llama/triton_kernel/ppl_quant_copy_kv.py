@@ -2,6 +2,7 @@ import torch
 
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.jit
@@ -70,18 +71,18 @@ def test2():
     import time
 
     B, N_CTX, H, D = 32, 1024, 12, 128
-    src = torch.randn((B * N_CTX, H, D), dtype=torch.float16).cuda()
-    dest_loc = torch.arange(0, B * N_CTX, dtype=torch.int32).cuda()
-    value_dest = torch.randn((B * N_CTX, H, D), dtype=torch.float16).cuda().to(torch.int8)
-    scale_dest = torch.randn((B * N_CTX, H, D // 8), dtype=torch.float16).cuda()
+    src = torch.randn((B * N_CTX, H, D), dtype=torch.float16).npu()
+    dest_loc = torch.arange(0, B * N_CTX, dtype=torch.int32).npu()
+    value_dest = torch.randn((B * N_CTX, H, D), dtype=torch.float16).npu().to(torch.int8)
+    scale_dest = torch.randn((B * N_CTX, H, D // 8), dtype=torch.float16).npu()
 
     for _ in range(10):
         destindex_copy_quantize_kv(src, dest_loc, value_dest, scale_dest)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t1 = time.time()
     for _ in range(1000):
         destindex_copy_quantize_kv(src, dest_loc, value_dest, scale_dest)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
 
     print("Time cost ", t2 - t1)

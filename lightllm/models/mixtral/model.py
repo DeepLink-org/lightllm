@@ -10,6 +10,7 @@ from lightllm.models.mixtral.layer_infer.transformer_layer_infer import MixtralT
 from lightllm.models.mixtral.layer_weights.transformer_layer_weight import MixtralTransformerLayerWeight
 
 from lightllm.utils.log_utils import init_logger
+import torch_npu
 
 logger = init_logger(__name__)
 
@@ -82,7 +83,7 @@ class MixtralTpPartModel(TpPartBaseModel):
         t = torch.arange(max_seq_len + 1024 * 64, device="cpu", dtype=torch.float32) / rope_scaling_factor
         freqs = torch.outer(t, inv_freq)
 
-        self._cos_cached = torch.cos(freqs).to(torch.float16).cuda()
-        self._sin_cached = torch.sin(freqs).to(torch.float16).cuda()
+        self._cos_cached = torch.cos(freqs).to(torch.float16).npu()
+        self._sin_cached = torch.sin(freqs).to(torch.float16).npu()
         return
     

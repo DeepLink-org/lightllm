@@ -14,13 +14,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 def test_llama2_infer():
     from lightllm.models.llama.model import LlamaTpPartModel
     test_model_inference(world_size=1,
-                         model_dir="/nvme/nvme2/share/share_data/llama_env/llama-2-7b-chat-hf",
+                         model_dir="/data/share_data/llama_model_data/llama-2-7b-chat-hf",
                          model_class=LlamaTpPartModel,
-                         batch_size=2,
-                         input_len=16,
-                         output_len=2,
+                         batch_size=1,
+                         input_len=256,
+                         output_len=6,
                          mode=[])
     return
 
 if __name__ == '__main__':
+    # import torch_npu
+    # with torch_npu.npu.profile(profiler_result_path="./result"):
     test_llama2_infer()

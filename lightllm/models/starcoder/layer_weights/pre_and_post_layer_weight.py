@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from lightllm.common.basemodel import PreAndPostLayerWeight
+import torch_npu
 
 
 class StarcoderPreAndPostLayerWeight(PreAndPostLayerWeight):
@@ -15,17 +16,17 @@ class StarcoderPreAndPostLayerWeight(PreAndPostLayerWeight):
         if "transformer.wte.weight" in weights:
             # print(weights['transformer.wte.weight'].shape)
             self.wte_weight_ = weights['transformer.wte.weight'][split_vob_size *
-                                                                    self.tp_rank_: split_vob_size * (self.tp_rank_ + 1), :].contiguous().to(self.data_type_).cuda()
+                                                                    self.tp_rank_: split_vob_size * (self.tp_rank_ + 1), :].contiguous().to(self.data_type_).npu()
         if "transformer.wpe.weight" in weights:
             # print(weights['transformer.wpe.weight'].shape)
-            self.wpe_weight_ = weights['transformer.wpe.weight'].to(self.data_type_).cuda()
+            self.wpe_weight_ = weights['transformer.wpe.weight'].to(self.data_type_).npu()
         if 'lm_head.weight' in weights:
             self.lm_head_weight_ = weights['lm_head.weight'][split_vob_size * self.tp_rank_: split_vob_size *
-                                                            (self.tp_rank_ + 1), :].contiguous().to(self.data_type_).cuda()
+                                                            (self.tp_rank_ + 1), :].contiguous().to(self.data_type_).npu()
         if "transformer.ln_f.weight" in weights:
-            self.final_norm_weight_ = weights['transformer.ln_f.weight'].contiguous().to(self.data_type_).cuda()
+            self.final_norm_weight_ = weights['transformer.ln_f.weight'].contiguous().to(self.data_type_).npu()
         if "transformer.ln_f.bias" in weights:
-            self.final_norm_bias_ = weights["transformer.ln_f.bias"].contiguous().to(self.data_type_).cuda()
+            self.final_norm_bias_ = weights["transformer.ln_f.bias"].contiguous().to(self.data_type_).npu()
         return
     
     def verify_load(self):

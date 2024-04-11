@@ -4,6 +4,7 @@ import torch
 
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.autotune(
@@ -425,7 +426,7 @@ def quantize_int4(weight, group_size=128, tp_rank=0):
     h1, h2 = weight.shape
     assert h1 % 8 == 0 and h2 % 8 == 0, "H1 {} H2 {}".format(h1, h2)
     assert h2 % group_size == 0, "H1 {} H2 {}".format(h1, h2)
-    weight = weight.contiguous().view(-1, group_size).cuda(tp_rank)
+    weight = weight.contiguous().view(-1, group_size).npu(tp_rank)
     weight_max = weight.amax(-1, keepdim=True)
     weight_max = torch.where(weight_max < 0, 0, weight_max)
     weight_min = weight.amin(-1, keepdim=True)
@@ -501,23 +502,23 @@ def test_int4(M, K, N):
     int_b, b_scale, b_zero_point, _ = quantize_int4(b)
     for _ in range(10):
         triton_output = matmul_dequantize_int4_s1(a, int_b, b_scale, b_zero_point)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         triton_output = matmul_dequantize_int4_s1(a, int_b, b_scale, b_zero_point)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     triton_time = t2 - t1
     print("Triton time cost", (t2 - t1))
     for _ in range(10):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     torch_time = t2 - t1
     print("Torch time cost", (t2 - t1))

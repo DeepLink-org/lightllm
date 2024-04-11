@@ -15,6 +15,7 @@ from lightllm.models.llama.triton_kernel.token_attention_softmax_and_reducev imp
 from lightllm.models.llama.infer_struct import LlamaInferStateInfo
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 from lightllm.common.basemodel import TransformerLayerInferTpl
+import torch_npu
 
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
@@ -234,7 +235,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="npu")
 
         att_m_tensor = token_att_fwd(q.view(calcu_shape1),
                         infer_state.mem_manager.key_buffer[self.layer_num_],
@@ -304,7 +305,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     #     total_token_num = infer_state.total_token_num
     #     batch_size = infer_state.batch_size
     #     calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-    #     att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+    #     att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="npu")
     #     token_att_fwd_int8k(q.view(calcu_shape1),
     #                         infer_state.mem_manager.key_buffer[self.layer_num_],
     #                         infer_state.mem_manager.key_scale_buffer[self.layer_num_],

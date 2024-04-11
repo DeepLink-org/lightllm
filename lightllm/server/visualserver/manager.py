@@ -13,6 +13,7 @@ from io import BytesIO
 from PIL import Image
 import time
 import torch
+import torch_npu
 
 
 class VisualManager:
@@ -77,7 +78,7 @@ class VisualManager:
             img_embed = obtain(ans[0])
         else:
             img_embed = ans[0]
-        torch.cuda.synchronize()
+        torch.npu.synchronize()
         b = time.time()
         for i in range(len(uuids)):
             # print(" + set_item_embed:", uuids[i], img_embed[i].shape)

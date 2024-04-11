@@ -2,6 +2,7 @@ import torch
 import math
 import numpy as np
 from lightllm.common.basemodel import TransformerLayerWeight
+import torch_npu
 
 
 class BloomTransformerLayerWeight(TransformerLayerWeight):
@@ -15,7 +16,7 @@ class BloomTransformerLayerWeight(TransformerLayerWeight):
         tp_head_num = head_num // self.world_size_
         tmp_alibi = self._generate_alibi(head_num, dtype=torch.float32)
         assert head_num % self.world_size_ == 0
-        self.tp_alibi = tmp_alibi[self.tp_rank_ * tp_head_num: (self.tp_rank_ + 1) * tp_head_num].contiguous().cuda()
+        self.tp_alibi = tmp_alibi[self.tp_rank_ * tp_head_num: (self.tp_rank_ + 1) * tp_head_num].contiguous().npu()
         return
     
     def load_hf_weights(self, weights):

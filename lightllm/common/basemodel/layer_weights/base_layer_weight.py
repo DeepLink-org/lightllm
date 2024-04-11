@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch_npu
 
 
 class BaseLayerWeight:
@@ -27,6 +28,6 @@ class BaseLayerWeight:
 
     def _cuda(self, cpu_tensor):
         if self.tp_rank_ is None:
-            return cpu_tensor.contiguous().to(self.data_type_).cuda()
+            return cpu_tensor.contiguous().to(self.data_type_).npu()
         else:
-            return cpu_tensor.contiguous().to(self.data_type_).cuda(self.tp_rank_)
+            return cpu_tensor.contiguous().to(self.data_type_).npu(self.tp_rank_)

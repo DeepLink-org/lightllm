@@ -3,6 +3,7 @@ import torch
 
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.autotune(
@@ -229,7 +230,7 @@ def quantize_int8(weight, axis=0, tp_rank=0):
     if axis == 0:
         weight = weight.t().contiguous().t()
     scale = scale.squeeze(axis)
-    return weight.contiguous().cuda(tp_rank), scale.contiguous().cuda(tp_rank)
+    return weight.contiguous().npu(tp_rank), scale.contiguous().npu(tp_rank)
 
 
 def test_correct_int8(M=32, N=4096, K=4096):
@@ -259,17 +260,17 @@ def test_int8(M, K, N):
         # int_a, a_scale = quantize_int8(a, 1)
         int_a, a_scale = quantize_int8_perrow(a)
         triton_output = matmul_int8(int_a, a_scale, int_b, scale_b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         #int_a, a_scale, _ = quantize_int8(a, 1)
         int_a, a_scale = quantize_int8_perrow(a)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     qt2 = time.time()
     for _ in range(iters):
         triton_output = matmul_int8(int_a, a_scale, int_b, scale_b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     quant_time = qt2 - t1
     triton_time = t2 - qt2
@@ -279,12 +280,12 @@ def test_int8(M, K, N):
         triton_time, triton_tflops, quant_time, quant_bandwith))
     for _ in range(10):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     iters = 512
     t1 = time.time()
     for _ in range(iters):
         torch_output = torch.matmul(a, b)
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     t2 = time.time()
     torch_time = t2 - t1
     torch_tflops = 2 * M * N * K * 1e-12 / (torch_time / iters)

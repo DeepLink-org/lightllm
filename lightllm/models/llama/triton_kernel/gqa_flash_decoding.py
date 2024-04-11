@@ -2,6 +2,7 @@ import time
 import torch
 import numpy as np
 from lightllm.common.basemodel import InferStateInfo
+import torch_npu
 
 def gqa_token_decode_attention_flash_decoding(q, infer_state:InferStateInfo, q_head_num, head_dim, cache_k, cache_v, out=None):
     BLOCK_SEQ = 128
@@ -19,10 +20,10 @@ def gqa_token_decode_attention_flash_decoding(q, infer_state:InferStateInfo, q_h
         b_seq_len_numpy = infer_state.b_seq_len.cpu().numpy()
 
         block_batch_ids = torch.from_numpy(np.concatenate([np.full(((b_seq_len_numpy[batch_id] + BLOCK_SEQ - 1) // BLOCK_SEQ,), fill_value=batch_id, dtype=np.int32) 
-                                         for batch_id in range(len(b_seq_len_numpy))], axis=0)).cuda()
+                                         for batch_id in range(len(b_seq_len_numpy))], axis=0)).npu()
         
         block_start_indexes = torch.from_numpy(np.concatenate([np.arange(0, seq_len, BLOCK_SEQ, dtype=np.int32)
-                                         for seq_len in b_seq_len_numpy], axis=0)).cuda()
+                                         for seq_len in b_seq_len_numpy], axis=0)).npu()
         
         assert len(block_batch_ids) == len(block_start_indexes)
         infer_state.block_batch_ids = block_batch_ids
@@ -34,12 +35,12 @@ def gqa_token_decode_attention_flash_decoding(q, infer_state:InferStateInfo, q_h
                                         max_len_in_batch // BLOCK_SEQ + 1, 
                                         head_dim], 
                                         dtype=torch.float32, 
-                                        device="cuda")
+                                        device="npu")
         infer_state.mid_o_logexpsum = torch.empty([batch_size, 
                                         q_head_num,
                                         max_len_in_batch // BLOCK_SEQ + 1], 
                                         dtype=torch.float32, 
-                                        device="cuda")
+                                        device="npu")
         
     mid_o = infer_state.mid_o
     mid_o_logexpsum = infer_state.mid_o_logexpsum

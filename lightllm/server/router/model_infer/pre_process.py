@@ -3,6 +3,7 @@ import numpy as np
 from .infer_batch import requests_mapping, InferReq, InferBatch
 from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.infer_utils import calculate_time
+import torch_npu
 
 #@calculate_time(show=True, min_cost_ms=1)
 def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
@@ -162,16 +163,16 @@ def splitfuse_prepare_decode_inputs(batch:InferBatch, splitfuse_block_size):
             "decode_req_num": decode_req_num,
             "decode_total_token_num": decode_total_token_num,
             "decode_b_req_idx": torch.tensor(decode_b_req_idx, dtype=torch.int32, device='cuda'),
-            "decode_b_start_loc": torch.tensor(decode_b_start_loc, dtype=torch.int32, device="cuda"),
-            "decode_b_seq_len": torch.tensor(decode_b_seq_len, dtype=torch.int32, device="cuda"),
+            "decode_b_start_loc": torch.tensor(decode_b_start_loc, dtype=torch.int32, device="npu"),
+            "decode_b_seq_len": torch.tensor(decode_b_seq_len, dtype=torch.int32, device="npu"),
             "decode_max_len_in_batch": decode_max_len_in_batch,
 
             "prefill_req_num": prefill_req_num,
-            "prefill_b_req_idx": torch.tensor(prefill_b_req_idx, dtype=torch.int32, device="cuda"),
-            "prefill_b_split_start_loc" : torch.tensor(prefill_b_split_start_loc, dtype=torch.int32, device="cuda"),
-            "prefill_b_split_seq_len" : torch.tensor(prefill_b_split_seq_len, dtype=torch.int32, device="cuda"),
+            "prefill_b_req_idx": torch.tensor(prefill_b_req_idx, dtype=torch.int32, device="npu"),
+            "prefill_b_split_start_loc" : torch.tensor(prefill_b_split_start_loc, dtype=torch.int32, device="npu"),
+            "prefill_b_split_seq_len" : torch.tensor(prefill_b_split_seq_len, dtype=torch.int32, device="npu"),
             "prefill_max_split_seq_len_in_batch" : prefill_max_split_seq_len_in_batch,
-            "prefill_b_seq_len" : torch.tensor(prefill_b_seq_len, dtype=torch.int32, device="cuda")
+            "prefill_b_seq_len" : torch.tensor(prefill_b_seq_len, dtype=torch.int32, device="npu")
         }
     return kwargs, decode_reqs, prefill_reqs
     

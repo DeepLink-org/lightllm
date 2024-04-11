@@ -12,6 +12,7 @@ from lightllm.models.qwen_vl.qwen_visual import QWenVisionTransformer
 from lightllm.models.llava.llava_visual import LlavaVisionModel
 from lightllm.utils.infer_utils import set_random_seed
 from lightllm.utils.infer_utils import calculate_time, mark_start, mark_end
+import torch_npu
 
 class VisualModelRpcServer(rpyc.Service):
 
@@ -34,11 +35,11 @@ class VisualModelRpcServer(rpyc.Service):
             if self.model_type == "qwen":
                 self.model = QWenVisionTransformer(**model_cfg["visual"]).eval().bfloat16()
                 self.model.load_model(weight_dir)
-                self.model = self.model.cuda()
+                self.model = self.model.npu()
             elif self.model_type == "llava":
                 self.model = LlavaVisionModel()
                 self.model.load_model(weight_dir)
-                self.model = self.model.cuda()
+                self.model = self.model.npu()
             else:
                 raise Exception(f"can not support {self.model_type} now")
         except Exception as e:

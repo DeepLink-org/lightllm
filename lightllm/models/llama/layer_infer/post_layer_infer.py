@@ -11,6 +11,7 @@ from lightllm.models.llama.infer_struct import LlamaInferStateInfo
 from lightllm.models.llama.triton_kernel.rmsnorm import rmsnorm_forward
 from lightllm.common.basemodel import PostLayerInferTpl
 from lightllm.utils.infer_utils import mark_cost_time
+import torch_npu
 
 from torch.profiler import record_function
 class LlamaPostLayerInfer(PostLayerInferTpl):
@@ -34,7 +35,7 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
             # for SplitFuse
             batch_size = infer_state.batch_size
             last_input = torch.empty((batch_size, self.embed_dim_), device=input_embdings.device, dtype=torch.float16)
-            tmp_ = torch.cat([torch.ones(infer_state.decode_req_num, dtype=torch.int32, device="cuda"), infer_state.prefill_b_split_seq_len], dim=0)
+            tmp_ = torch.cat([torch.ones(infer_state.decode_req_num, dtype=torch.int32, device="npu"), infer_state.prefill_b_split_seq_len], dim=0)
             last_index = torch.cumsum(tmp_, dim=0, dtype=torch.long) - 1
             last_input[:, :] = input_embdings[last_index, :]
             return last_input, batch_size

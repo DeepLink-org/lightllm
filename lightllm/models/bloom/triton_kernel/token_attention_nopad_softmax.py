@@ -2,6 +2,7 @@ import torch
 
 import triton
 import triton.language as tl
+import torch_npu
 
 
 @triton.jit
@@ -62,11 +63,11 @@ def test1():
 
     dtype = torch.float16
 
-    Logics = torch.empty((H, B * N_CTX), dtype=dtype, device="cuda").normal_(mean=0.1, std=10)
-    ProbOut = torch.empty((H, B * N_CTX), dtype=dtype, device="cuda").normal_(mean=0.4, std=0.2)
+    Logics = torch.empty((H, B * N_CTX), dtype=dtype, device="npu").normal_(mean=0.1, std=10)
+    ProbOut = torch.empty((H, B * N_CTX), dtype=dtype, device="npu").normal_(mean=0.4, std=0.2)
 
-    b_start_loc = torch.zeros((B,), dtype=torch.int32, device="cuda")
-    b_seq_len = torch.zeros((B,), dtype=torch.int32, device="cuda")
+    b_start_loc = torch.zeros((B,), dtype=torch.int32, device="npu")
+    b_seq_len = torch.zeros((B,), dtype=torch.int32, device="npu")
 
     for i in range(B):
         b_start_loc[i] = i * N_CTX
@@ -88,11 +89,11 @@ def test2():
 
     dtype = torch.float16
 
-    Logics = torch.empty((H, B * N_CTX), dtype=dtype, device="cuda").normal_(mean=0.1, std=10)
-    ProbOut = torch.empty((H, B * N_CTX), dtype=dtype, device="cuda").normal_(mean=0.4, std=0.2)
+    Logics = torch.empty((H, B * N_CTX), dtype=dtype, device="npu").normal_(mean=0.1, std=10)
+    ProbOut = torch.empty((H, B * N_CTX), dtype=dtype, device="npu").normal_(mean=0.4, std=0.2)
     B = 4
-    b_start_loc = torch.zeros((B,), dtype=torch.int32, device="cuda")
-    b_seq_len = torch.zeros((B,), dtype=torch.int32, device="cuda")
+    b_start_loc = torch.zeros((B,), dtype=torch.int32, device="npu")
+    b_seq_len = torch.zeros((B,), dtype=torch.int32, device="npu")
 
     b_seq_len[0] = 513
     b_seq_len[1] = 1025
