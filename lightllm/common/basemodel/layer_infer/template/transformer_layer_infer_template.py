@@ -151,10 +151,12 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         return input_embdings
 
     def token_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
-        self._token_attention(input_embdings,
-                                    infer_state,
-                                    layer_weight=layer_weight)
-        self._token_ffn(input_embdings, infer_state, layer_weight)
+        with torch.autograd.profiler.record_function("mark_attention"):
+            self._token_attention(input_embdings,
+                                        infer_state,
+                                        layer_weight=layer_weight)
+        with torch.autograd.profiler.record_function("mark_ffn"):
+            self._token_ffn(input_embdings, infer_state, layer_weight)
         return input_embdings
     
     def splitfuse_forward(self, input_embdings, infer_state: SplitFuseInferStateInfo, layer_weight):

@@ -63,8 +63,10 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
         b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="npu")
         total_token_num += batch_size
         b_seq_len += 1
-        logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
-                                   predict_ids).npu().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+        import torch_npu
+        with torch_npu.npu.profile(profiler_result_path="./result", use_e2e_profiler=True):
+            logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
+                                        predict_ids).npu().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
         prob_out = torch.softmax(logics, dim=-1)
         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
         predict_ids = predict_ids.detach().cpu().numpy()
@@ -72,9 +74,9 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     model_part.mem_manager.free_all()
     model_part.req_manager.free_all()
     
-    if rank_id == 0:
-        print("can use mem size:", model_part.mem_manager.can_use_mem_size)
-        print("can use req size:", model_part.req_manager.can_use_req_size)
+    # if rank_id == 0:
+    #     print("can use mem size:", model_part.mem_manager.can_use_mem_size)
+    #     print("can use req size:", model_part.req_manager.can_use_req_size)
         
     b_req_idx = None
     b_start_loc = None
@@ -83,9 +85,9 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     dist.barrier()
     import time
     torch.npu.synchronize()
-    start_time = time.time()
+    # start_time = time.time()
 
-    prefill_start_time = time.time()
+    # prefill_start_time = time.time()
 
     b_req_idx = model_part.req_manager.alloc(batch_size).int()
     b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="npu")
@@ -102,12 +104,12 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     predict_ids = predict_ids.detach().cpu().numpy()
 
     torch.npu.synchronize()
-    if rank_id == 0:
-        print("prefill time cost:", (time.time() - prefill_start_time) * 1000)
+    # if rank_id == 0:
+    #     print("prefill time cost:", (time.time() - prefill_start_time) * 1000)
 
     for i in range(output_len):
         torch.npu.synchronize()
-        step_start = time.time()
+        # step_start = time.time()
         b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="npu")
         total_token_num += batch_size
         b_seq_len += 1
@@ -118,15 +120,15 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
         predict_ids = predict_ids.detach().cpu().numpy()
         torch.npu.synchronize()
-        if i % 100 == 0 or i == output_len - 1:
-            if rank_id == 0:
-                print(i, "step cost time:", (time.time() - step_start) * 1000)
+        # if i % 100 == 0 or i == output_len - 1:
+        #     if rank_id == 0:
+        #         print(i, "step cost time:", (time.time() - step_start) * 1000)
 
     torch.npu.synchronize()
     end_time = time.time()
 
-    if rank_id == 0:
-        print("time total cost(ms):", (end_time - start_time) * 1000)
+    # if rank_id == 0:
+    #     print("time total cost(ms):", (end_time - start_time) * 1000)
     ans_queue.put(True)
 
     return

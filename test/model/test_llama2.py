@@ -23,6 +23,4 @@ def test_llama2_infer():
     return
 
 if __name__ == '__main__':
-    # import torch_npu
-    # with torch_npu.npu.profile(profiler_result_path="./result"):
     test_llama2_infer()
