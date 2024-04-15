@@ -21,7 +21,7 @@ import time
 import torch
 import uvloop
 import sys
-
+import re
 from .build_prompt import build_prompt
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -44,6 +44,7 @@ from .embed_cache.manager import start_cache_manager
 from .visualserver.manager import start_visual_process
 from .req_id_generator import ReqIDGenerator
 
+from .sot import format_outline_prompt,format_point_prompt
 from lightllm.utils.net_utils import alloc_can_use_network_port
 from lightllm.utils.start_utils import start_submodule_processes
 
@@ -80,6 +81,164 @@ def healthcheck():
     return "OK"
 
 
+@app.post("/generate_sot")
+async def generate_sot(request: Request) -> Response:
+    global isFirst
+    if isFirst:
+        loop = asyncio.get_event_loop()
+        loop.create_task(httpserver_manager.handle_loop())
+        isFirst = False
+
+    request_dict = await request.json()
+    
+    prompts = {"point_prompt": "You're responsible for continuing the writing of one and only one point in the overall answer to the following question.\n\n{request}\n\nThe skeleton of the answer is\n\n{outline}\n\nContinue and only continue the writing of point {point}. Write it **very shortly** in 1~2 sentence and do not continue with other points! [ROLESWITCHING assistant:]{point}. {point_outline}", "outline_prompt": "You're an organizer responsible for only giving the skeleton (not the full content) for answering the question. Provide the skeleton in a list of points (numbered 1., 2., 3., etc.) to answer the question. Instead of writing a full sentence, each skeleton point should be very short with only 3~5 words. Generally, the skeleton should have 3~10 points.\n\nQuestion:\nWhat are the typical types of Chinese dishes?\nSkeleton:\n1. Dumplings. \n2. Noodles. \n3. Dim Sum. \n4. Hot Pot. \n5. Wonton. \n6. Ma Po Tofu. \n7. Char Siu. \n8. Fried Rice. \n\nQuestion:\nWhat are some practical tips for individuals to reduce their carbon emissions?\nSkeleton:\n1. Energy conservation. \n2. Efficient transportation. \n3. Home energy efficiency. \n4. Reduce water consumption. \n5. Sustainable diet. \n6. Sustainable travel. \n\nNow, please provide the skeleton for the following question.\n{request}\nSkeleton:\n [ROLESWITCHING assistant:] 1."}
+    outline_prompt = prompts["outline_prompt"]
+    point_prompt = prompts["point_prompt"]
+    
+    prompt = request_dict.pop("inputs")
+    outline_ques, partial_answer = format_outline_prompt(outline_prompt=outline_prompt,request=prompt)
+    #print(outline_ques)
+    sample_params_dict = request_dict["parameters"]
+    return_details = sample_params_dict.pop("return_details", False)
+    sampling_params = SamplingParams(**sample_params_dict)
+    sampling_params.verify()
+    multimodal_params_dict = request_dict.get("multimodal_params", {})
+    multimodal_params = MultimodalParams(**multimodal_params_dict)
+
+    request_id = g_id_gen.generate_id()
+    start_time = time.time()
+    #stage 1：生成skeleton
+    results_generator = httpserver_manager.generate(outline_ques, sampling_params, request_id, multimodal_params)
+
+    #print(results_generator)
+    # Non-streaming case
+    final_output = []
+    count_output_tokens = 0
+    tokens = []
+    prompt_logprobs = None
+    prompt_token_ids = None
+    is_first_metadata = True
+    async for request_output, metadata, finish_status in results_generator:
+        if await request.is_disconnected():
+            # Abort the request if the client disconnects.
+            await httpserver_manager.abort(request_id)
+            return Response(status_code=499)
+
+        # when set "--return_all_prompt_logprobs", the first token metadata will contains
+        # prompt_logprobs and prompt_token_ids
+        if is_first_metadata:
+            prompt_logprobs = metadata.get("prompt_logprobs", None)
+            prompt_token_ids = metadata.get("prompt_token_ids", None)
+            if prompt_logprobs is not None:
+                del metadata["prompt_logprobs"]
+            if prompt_token_ids is not None:
+                del metadata["prompt_token_ids"]
+            is_first_metadata = False
+
+        count_output_tokens += 1
+        final_output.append(request_output)
+        if return_details:
+            metadata["text"] = request_output
+            tokens.append(metadata)
+            
+    #get outline result    
+    outline_result = "".join(final_output)
+    if partial_answer:
+        outline_result = outline_result
+    
+    #Extract points
+    re_result = re.findall(r"(\d+)\.\s?([\s\S]+?)(?=\n|\n*$)", outline_result)
+    #print("re_result:",re_result)
+    
+    if len(re_result) > 0:
+        points, point_outlines = zip(*re_result)
+    else:
+        points, point_outlines = [], []
+    assert len(points) == len(point_outlines)
+    num_points = len(points)
+    #contents_time = []    
+    if num_points > 0:
+        # Filter to get unique point indexes
+        points_filtered = []
+        point_outlines_filtered = []
+        points_set = set([])
+        for i in range(num_points):
+            if points[i] not in points_set:
+                points_set.add(points[i])
+                points_filtered.append(points[i])
+                point_outlines_filtered.append(point_outlines[i])
+        points = points_filtered
+        point_outlines = point_outlines_filtered
+
+        pe_ques_and_partial_list = [
+            format_point_prompt(
+                point_prompt=point_prompt,
+                request=prompt,
+                point=point,
+                outline=outline_result,
+                point_outline=point_outline,
+            )
+            for point, point_outline in zip(points, point_outlines)
+        ]
+        
+        if isinstance(prompt,str):
+            prompt=[prompt]
+        
+        pe_requests = [prompt.copy() for _ in range(len(points))]
+        for pe_request, (pe_ques, pe_partial) in zip(
+            pe_requests, pe_ques_and_partial_list
+        ):#pe_requests:prompt + pe_ques 
+            pe_request[-1] = pe_ques
+            pe_request.append("\n")#666
+            pe_request.append(pe_partial)
+            #print(pe_partial)
+        print("pe_requests:",pe_requests)
+        contents = []
+        #stage 2：填充skeleton
+        for i_point, sub_request in enumerate(pe_requests):
+            #print("sub_request:",sub_request)
+            sub_request = "".join(sub_request)
+            #print(f"{i_point}:sub_request    ",sub_request)
+            point_generate=httpserver_manager.generate(sub_request, sampling_params, request_id, multimodal_params)
+            point_final_output=[]
+            async for request_output, metadata, finish_status in point_generate:
+                count_output_tokens += 1 
+                point_final_output.append(request_output)
+                if return_details:
+                    metadata["text"] = request_output
+                tokens.append(metadata)
+            each_point_output = "".join(point_final_output)
+            #print(f"{i_point}:each_point_output",each_point_output)
+            # append the text of the point #i_point to `contents`
+            contents.append(each_point_output)
+            #contents_time.append(outputs["time"])
+        # for final response, concatenate the partial answer together
+        for i_point, (_, partial_answer) in enumerate(pe_ques_and_partial_list):
+            if partial_answer:
+                contents[i_point] = partial_answer + " " + contents[i_point]
+                #print(contents[i_point])
+    else:
+        contents = []
+    
+    output = "".join(contents)
+    assert final_output is not None
+    ret = {
+        "generated_text": ["".join(output)],
+        "count_output_tokens": count_output_tokens,
+        "finish_reason": finish_status.get_finish_reason(),
+    }
+    end_time = time.time()
+    print("sot_generate cost time:",end_time - start_time)
+    
+    if return_details:
+        ret["tokens"] = tokens
+    if prompt_token_ids is not None:
+        ret["prompt_token_ids"] = prompt_token_ids
+    if prompt_logprobs is not None:
+        ret["prompt_logprobs"] = prompt_logprobs
+    return Response(content=json.dumps(ret, ensure_ascii=False).encode("utf-8"))
+
+
 @app.post("/generate")
 async def generate(request: Request) -> Response:
     global isFirst
@@ -98,6 +257,7 @@ async def generate(request: Request) -> Response:
     multimodal_params = MultimodalParams(**multimodal_params_dict)
 
     request_id = g_id_gen.generate_id()
+    start_time = time.time()
     results_generator = httpserver_manager.generate(prompt, sampling_params, request_id, multimodal_params)
 
     # Non-streaming case
@@ -136,6 +296,10 @@ async def generate(request: Request) -> Response:
         "count_output_tokens": count_output_tokens,
         "finish_reason": finish_status.get_finish_reason(),
     }
+    
+    end_time = time.time()
+    print("generate cost time:",end_time-start_time)
+    
     if return_details:
         ret["tokens"] = tokens
     if prompt_token_ids is not None:

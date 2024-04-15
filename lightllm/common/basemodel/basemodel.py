@@ -154,6 +154,16 @@ class TpPartBaseModel:
         multimodal_params=None,
         is_prefill=True,
     ):
+        """
+        batch_size(int):          infer batchsize
+        total_token_num(long):        batch*input_len
+        max_len_in_batch(int):         input_len 1024
+        input_ids :  flattenned input_ids
+        b_req_idx: maybe batch index
+        b_start_loc:Tensor[torch.int32]  every batch's start token index  len=batchsize
+        b_seq_len:Tensor[torch.int32]  every batch's sequence length  len=batchsize
+        b_ready_cache_len:Tensor[torch.int32]
+        """
         if is_prefill:
             return self._prefill(
                 batch_size,
