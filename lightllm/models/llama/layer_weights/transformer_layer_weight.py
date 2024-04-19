@@ -24,7 +24,9 @@ class LlamaTransformerLayerWeight(TransformerLayerWeight):
                    self.ffn_norm_weight_,
                    self.up_proj,
                    self.gate_proj,
-                   self.down_proj
+                   self.down_proj,
+                   self.kv_weight_,
+                   self.gate_up_proj,
                    ]
         for i in range(len(weights)):
             assert weights[i] is not None, "index:" + str(i) + " " + errors
@@ -59,6 +61,8 @@ class LlamaTransformerLayerWeight(TransformerLayerWeight):
             self.o_weight_ = weights[f"model.layers.{self.layer_num_}.self_attn.o_proj.weight"]
             self.o_weight_ = self.o_weight_[:, q_split_n_embed * self.tp_rank_: q_split_n_embed * (self.tp_rank_ + 1)]
             self.o_weight_ = self._cuda(self.o_weight_.transpose(0, 1))
+        self._try_cat_to(["k_weight_", "v_weight_"], "kv_weight_", cat_dim=1)
+        self._try_cat_to(["q_weight_", "k_weight_", "v_weight_"], "qkv_weight_", cat_dim=1)
         return
     
     def _load_ffn_weights(self, weights):
@@ -82,4 +86,5 @@ class LlamaTransformerLayerWeight(TransformerLayerWeight):
             self.down_proj = weights[f"model.layers.{self.layer_num_}.mlp.down_proj.weight"][:,
                                                                                              split_inter_size * self.tp_rank_: split_inter_size * (self.tp_rank_ + 1)]
             self.down_proj = self._cuda(self.down_proj.transpose(0, 1))
+        self._try_cat_to(["gate_proj", "up_proj"], "gate_up_proj", cat_dim=1)
         return
