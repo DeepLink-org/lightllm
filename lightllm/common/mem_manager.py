@@ -38,7 +38,9 @@ class MemoryManager:
         return select_index
     
     @torch.no_grad()
-    def alloc_contiguous(self, need_size):
+    def alloc_contiguous(self, need_size, full_size=0, debug=False):
+        ori_need_size = need_size
+        need_size = max(need_size, full_size)
         if self.always_copy:
             return None
         if need_size > self.can_use_mem_size:
@@ -49,12 +51,13 @@ class MemoryManager:
         can_use_index_size = len(can_use_index)
         can_use_index = can_use_index[0 : can_use_index_size - need_size + 1][(can_use_index[need_size - 1: ] - can_use_index[0 : can_use_index_size - need_size + 1]) == need_size - 1]
         if can_use_index.shape[0] == 0:
-            # logger.warn(f'warn no enough cache need_size {need_size} left_size {self.can_use_mem_size}')
+            logger.warn(f'warn no enough cache need_size {need_size} left_size {self.can_use_mem_size}')
             return None
         start = can_use_index[0].item()
         end = start + need_size
         select_index = self.indexes[start : end]
         self.add_refs(select_index)
+        return select_index, start, start+ori_need_size
         return select_index, start, end
     
     @torch.no_grad()
