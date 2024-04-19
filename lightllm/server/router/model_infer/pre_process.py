@@ -7,9 +7,6 @@ from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.infer_utils import calculate_time
 
 
-max_prompt_size = 10
-left_pad_size_list = []
-
 #@calculate_time(show=True, min_cost_ms=1)
 def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
     run_reqs, not_run_reqs = [], []
@@ -39,18 +36,6 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
         seq_len = len(req.input_token_ids)
         input_id = req.input_token_ids
 
-        # padding
-        global max_prompt_size
-        global left_pad_size_list
-        while max_prompt_size < seq_len:
-            max_prompt_size += 32
-        padding_size = max_prompt_size - seq_len
-        left_pad_size_list.append(padding_size)
-        padding_input = [0 for _ in range(padding_size)]
-
-        seq_len = max_prompt_size
-        input_id = padding_input + input_id
-        req.input_token_ids = input_id
         nopad_b_seq_len.append(seq_len)
         input_ids.append(input_id)
         nopad_total_token_num += seq_len
@@ -66,40 +51,11 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
         nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
 
-        # print("==================")
-        # print(len(batch.request_ids))
-        # print(nopad_total_token_num)
-        # print(nopad_max_len_in_batch)
-        # print(type(input_ids))
-        # print(input_ids.shape)
-        # print("==================")
-        
-        # padding
-        is_padding = os.getenv("IS_PADDING", "False") == "True"
-        origin_mask_full = torch.zeros((1, 1, nopad_max_len_in_batch, nopad_max_len_in_batch),
-                                           dtype=torch.float32, device="cuda")
-        masks = []
-        for pad_size in left_pad_size_list:
-            final_mask_full = origin_mask_full.clone()
-            if is_padding and pad_size != 0:
-                right_corner_mask = torch.full((nopad_max_len_in_batch - pad_size, nopad_max_len_in_batch - pad_size),
-                                                float("1.0"), device="cuda")
-                right_corner_mask = torch.tril(right_corner_mask, diagonal=1).to(torch.float32)
-                right_corner_mask[right_corner_mask == 0.] = -100000000.0
-                left_corner_mask = torch.full((1, 1, nopad_max_len_in_batch - pad_size, pad_size),
-                                            float("-inf"), device="cuda").to(torch.float32)
-                final_mask_full[:, :, pad_size:, pad_size:] = right_corner_mask
-                final_mask_full[:, :, pad_size:, :pad_size] = left_corner_mask
-            masks.append(final_mask_full) 
-        masks = torch.cat(masks, dim=0)
-
         kwargs = {
             "batch_size": len(batch),
             "total_token_num": nopad_total_token_num,
             "max_len_in_batch": nopad_max_len_in_batch,
             "input_ids": input_ids,
-            "masks": masks,
-            "is_padding": is_padding,
             "b_req_idx": nopad_b_req_idx,
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,
@@ -143,35 +99,11 @@ def prepare_decode_inputs(batch:InferBatch):
         nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
 
-        # padding
-        global max_prompt_size
-        global left_pad_size_list
-        is_padding = os.getenv("IS_PADDING", "False") == "True"
-
-        origin_mask_full = torch.zeros((1, nopad_max_len_in_batch),
-                                        dtype=torch.float32, device="cuda")
-        masks = []
-        for pad_size in left_pad_size_list:
-            left_corner_mask = torch.full((1, pad_size), float("-inf"),
-                                            device="cuda").to(torch.float32)
-            final_mask_full = origin_mask_full.clone()
-            if is_padding and pad_size != 0:
-                start = nopad_max_len_in_batch - max_prompt_size
-                end = start + pad_size
-                print("======================")
-                print(nopad_max_len_in_batch, start, end, seq_len, flush=True)
-                print("======================")
-                final_mask_full[:, start:end] = left_corner_mask
-            masks.append(final_mask_full)
-        masks = torch.cat(masks, dim=0)
-
         kwargs = {
             "batch_size": len(batch),
             "total_token_num": nopad_total_token_num,
             "max_len_in_batch": nopad_max_len_in_batch,
             "input_ids": input_ids,
-            "masks": masks,
-            "is_padding": is_padding,
             "b_req_idx": nopad_b_req_idx,
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,

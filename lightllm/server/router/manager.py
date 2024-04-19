@@ -5,6 +5,8 @@ import asyncio
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 import zmq
 import zmq.asyncio
+import torch
+
 from typing import Dict, List, Optional
 from ..sampling_params import SamplingParams
 from ..io_struct import Req, NormalReq, SplitFuseReq, Batch
@@ -141,23 +143,46 @@ class RouterManager:
 
     async def loop_for_fwd(self,):
         counter_count = 0
+        batch_count = 0
         while True:
-            await self._step()
-            counter_count += 1
-            if self.running_batch is not None:
-                if counter_count % 50 == 0:
-                    total_used_tokens = self.prompt_cache_used_tokens + self.running_batch.batch_used_tokens + self.req_queue.pause_req_used_tokens
-                    token_ratio = total_used_tokens / self.max_total_token_num
-                    logger.debug(
-                        f"current batch size: {len(self.running_batch.reqs)} " 
-                        f"paused req num: {len(self.req_queue.pause_req_dict)} "
-                        f"token used ratio: {token_ratio} "
-                    )
-                    pass
-                self.stats_tool.print_stats()
-                
-            if self.running_batch is None:
-                await asyncio.sleep(0.01)  # 10ms
+            batch_count += 1
+            if False:
+            # if batch_count > 14:
+                with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], record_shapes=True) as prof:
+                    await self._step()
+                    counter_count += 1
+                    if self.running_batch is not None:
+                        if counter_count % 50 == 0:
+                            total_used_tokens = self.prompt_cache_used_tokens + self.running_batch.batch_used_tokens + self.req_queue.pause_req_used_tokens
+                            token_ratio = total_used_tokens / self.max_total_token_num
+                            logger.debug(
+                                f"current batch size: {len(self.running_batch.reqs)} " 
+                                f"paused req num: {len(self.req_queue.pause_req_dict)} "
+                                f"token used ratio: {token_ratio} "
+                            )
+                            pass
+                        self.stats_tool.print_stats()
+                    if self.running_batch is None:
+                        await asyncio.sleep(0.01)  # 10ms
+                output_path = "/data2/zhoushenglong/server_profile.json"
+                prof.export_chrome_trace(output_path)
+                break
+            else:
+                await self._step()
+                counter_count += 1
+                if self.running_batch is not None:
+                    if counter_count % 50 == 0:
+                        total_used_tokens = self.prompt_cache_used_tokens + self.running_batch.batch_used_tokens + self.req_queue.pause_req_used_tokens
+                        token_ratio = total_used_tokens / self.max_total_token_num
+                        logger.debug(
+                            f"current batch size: {len(self.running_batch.reqs)} " 
+                            f"paused req num: {len(self.req_queue.pause_req_dict)} "
+                            f"token used ratio: {token_ratio} "
+                        )
+                        pass
+                    self.stats_tool.print_stats()
+                if self.running_batch is None:
+                    await asyncio.sleep(0.01)  # 10ms
 
     async def _step(self):
         """
@@ -170,12 +195,14 @@ class RouterManager:
             if new_batch is not None:
                 self.stats_tool.count_prompt_tokens(new_batch)
                 self.running_batch = new_batch
-                await self._prefill_batch(self.running_batch)
+                with torch.profiler.record_function("_step_prefill"):
+                    await self._prefill_batch(self.running_batch)
                 self._filter_runing_batch()
                 self.has_wait_tokens = 0
             return
 
         # 有运行请求，但是已经到了可以调度新的请求合并推理的时机
+        '''
         if self.has_wait_tokens >= self.max_wait_tokens:
             new_mini_batch = self.req_queue.generate_new_batch(self.running_batch)
             self.has_wait_tokens = 0
@@ -186,12 +213,14 @@ class RouterManager:
                     await self._merge_batch(self.running_batch, new_mini_batch)
                     self.running_batch.merge(new_mini_batch)
                 return
+        '''
 
         # 正常 decode 阶段， 如果可以直接decode就直接decode，否则通过暂停策略暂停一些请求
         # 释放一些管理的 token
         if self._can_decode(self.running_batch):
             self.stats_tool.count_output_tokens(self.running_batch)
-            await self._decode_batch(self.running_batch)
+            with torch.profiler.record_function("_step_normal_decode"):
+                await self._decode_batch(self.running_batch)
             self._filter_runing_batch()
             self.has_wait_tokens += 1
             return

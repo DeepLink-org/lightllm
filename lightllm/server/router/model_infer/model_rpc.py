@@ -230,10 +230,13 @@ class ModelRpcServer(rpyc.Service):
             kwargs, run_reqs, not_run_reqs = prepare_decode_inputs(batch)
         
         if len(run_reqs) >= 1:
-            logits = self.model.forward(**kwargs)
-            next_token_ids, next_token_probs = sample(logits, run_reqs)
-            next_token_ids = next_token_ids.detach().cpu().numpy()
-            next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
+            with torch.profiler.record_function("calc logits forward"):
+                logits = self.model.forward(**kwargs)
+            with torch.profiler.record_function("sample"):
+                next_token_ids, next_token_probs = sample(logits, run_reqs)
+            with torch.profiler.record_function("after sample"):
+                next_token_ids = next_token_ids.detach().cpu().numpy()
+                next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
 
             for req_obj, next_token_id, next_token_logprob in zip(run_reqs, next_token_ids, next_token_logprobs):
                 # prefill and decode is same

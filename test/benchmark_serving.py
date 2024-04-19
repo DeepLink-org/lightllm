@@ -104,7 +104,8 @@ def sample_requests(
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             continue
-        if prompt_len > 1024 or prompt_len + output_len > 2048:
+        if prompt_len > 256 or prompt_len + output_len > 512 :
+        # if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
         filtered_dataset.append((prompt, prompt_len, output_len))
@@ -143,7 +144,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate'
+    url = 'http://localhost:8899/generate'
       
     data = {
         'inputs': prompt,
@@ -156,7 +157,8 @@ async def send_request(
     }
        
 
-    timeout = aiohttp.ClientTimeout(total=3 * 3600)
+    # set total = 10 * 3600 to avoid  timeout error in compile mode
+    timeout = aiohttp.ClientTimeout(total=10 * 3600)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         while True:
             async with session.post(url, headers=headers, json=data) as response:
@@ -184,7 +186,8 @@ async def benchmark(
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
         tasks.append(task)
-    await asyncio.gather(*tasks)
+        # await asyncio.gather(task) # 同步
+    await asyncio.gather(*tasks) # 异步
 
 
 def main(args: argparse.Namespace):
@@ -192,7 +195,19 @@ def main(args: argparse.Namespace):
     random.seed(args.seed)
     np.random.seed(args.seed)
     tokenizer = get_tokenizer(args.tokenizer, "slow")
-    input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+
+    # input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+    # input_request = ("How are you? ", 6, 4)
+    # input_requests = [input_request for i in range(5)]
+
+    input_request = ("How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
+                     How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 8)
+    input_requests = [input_request for i in range(10)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
@@ -200,6 +215,14 @@ def main(args: argparse.Namespace):
     benchmark_time = benchmark_end_time - benchmark_start_time
     print(f"Total time: {benchmark_time:.2f} s")
     print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
+
+    # debug info
+    print("***********************************************************")
+    for prompt_len, output_len, latency in REQUEST_LATENCY:
+        print(latency)
+        print(prompt_len, output_len)
+        print(f"{(prompt_len + output_len)/(latency):8.3f} tokens/s\n")
+    print("***********************************************************")
 
     # Compute the latency statistics.
     avg_latency = np.mean([latency for _, _, latency in REQUEST_LATENCY])
@@ -220,7 +243,7 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Benchmark the online serving throughput.")
-    parser.add_argument("--dataset", type=str, required=True,
+    parser.add_argument("--dataset", type=str,
                         help="Path to the dataset.")
     parser.add_argument("--tokenizer", type=str, required=True,
                         help="Name or path of the tokenizer.")
