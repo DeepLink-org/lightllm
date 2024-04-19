@@ -20,8 +20,6 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
         self.vob_start_id_ = tp_vocab_size_ * self.tp_rank_
         self.vob_end_id_ = tp_vocab_size_ * (self.tp_rank_ + 1)
 
-        self.opt_pre_context_forward = torch.compile(self.pre_context_forward, backend='ascendgraph', dynamic=False)
-        self.opt_pre_token_forward = torch.compile(self.pre_token_forward, backend='ascendgraph', dynamic=False)
         return
 
     def pre_context_forward(self, input_ids, layer_weight):
@@ -50,15 +48,12 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
             dist.all_reduce(input_embdings, op=dist.ReduceOp.SUM, async_op=False)
         return input_embdings
 
-    @record_function('pre_context_forward')
     def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight):
-        input_embdings = self.opt_pre_context_forward(input_ids, layer_weight.wte_weight_)
-        # input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_)
+        input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_)
         return input_embdings
 
-    @record_function('pre_token_forward')
     def token_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight):
-        input_embdings = self.opt_pre_token_forward(input_ids, layer_weight.wte_weight_)
+        input_embdings = self.pre_token_forward(input_ids, layer_weight.wte_weight_)
         return input_embdings
     
     @mark_cost_time("splitfuse forward")

@@ -1,9 +1,12 @@
 import os
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 import json
+import time
 import torch
 from typing import final
+from torch.profiler import record_function
 
+import torch_dipu
 from lightllm.common.basemodel.layer_weights.hf_load_utils import load_hf_weights
 from lightllm.common.basemodel.infer_struct import InferStateInfo
 from lightllm.common.basemodel.splitfuse_infer_struct import SplitFuseInferStateInfo
@@ -12,11 +15,9 @@ from lightllm.common.req_manager import ReqManager
 from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
-# from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
 
 torch.backends.cudnn.enabled = True
 
-from torch.profiler import record_function
 
 class TpPartBaseModel:
     # weight class
@@ -55,8 +56,10 @@ class TpPartBaseModel:
         self._init_some_value()
         self._init_custom()
 
-        # self.opt_all_layer_context_forward = torch.compile(self.all_layer_context_forward, backend='ascendgraph', dynamic=False)
         self.opt_context_forward = torch.compile(self._context_forward, backend='ascendgraph', dynamic=False)
+        self.opt_token_forward = torch.compile(self._token_forward, backend='ascendgraph', dynamic=False)
+        self.opt_all_layer_token_forward_with_pre_post_process = torch.compile(self.all_layer_token_forward_with_pre_post_process, backend='ascendgraph', dynamic=False)
+
         return
     
     def _init_config(self):
@@ -144,14 +147,15 @@ class TpPartBaseModel:
             max_len_in_batch,
             input_ids : torch.Tensor,
             masks : torch.Tensor,
-            is_padding: bool,
+            is_padding : bool,
             b_req_idx : torch.Tensor,
             b_start_loc : torch.Tensor,
             b_seq_len : torch.Tensor,
             multimodal_params=None,
             is_prefill=True):
         if is_prefill:
-            return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            predict_logics = self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            return predict_logics
         else:
             return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
@@ -173,9 +177,7 @@ class TpPartBaseModel:
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num)
-        # test non contiguous mem alloc.
-        # alloc_mem = None
+        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, self.max_seq_length * batch_size)
         if alloc_mem is not None:
             infer_state.mem_is_contiguous = True
             infer_state.mem_index = alloc_mem[0]
@@ -183,6 +185,7 @@ class TpPartBaseModel:
             infer_state.mem_end = alloc_mem[2]
 
         else:
+            assert()
             infer_state.mem_is_contiguous = False
             alloc_mem = self.mem_manager.alloc(infer_state.total_token_num)
             infer_state.mem_index = alloc_mem
@@ -190,14 +193,10 @@ class TpPartBaseModel:
             infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         
         init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
-                            max_len_in_batch, infer_state.mem_index)
+                            max_len_in_batch, infer_state.mem_index, self.max_seq_length)
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
-        predict_logics = self._context_forward(input_ids, infer_state)
-        # predict_logics = self.opt_context_forward(input_ids, infer_state)
-
-        # print("===============================================", flush=True)
-        # print(predict_logics, flush=True)
+        predict_logics = self.opt_context_forward(input_ids, infer_state)
 
         return predict_logics
     
@@ -217,23 +216,19 @@ class TpPartBaseModel:
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(batch_size)
-        if alloc_mem is not None:
-            infer_state.mem_is_contiguous = True
-            infer_state.mem_index = alloc_mem[0]
-            infer_state.mem_start = alloc_mem[1]
-            infer_state.mem_end = alloc_mem[2]
-            copy_kv_index_to_req(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len, infer_state.mem_index)
-        else:
-            infer_state.mem_is_contiguous = False
-            alloc_mem = self.mem_manager.alloc(batch_size)
-            infer_state.mem_index = alloc_mem
-            infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            copy_kv_index_to_req(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len, infer_state.mem_index)
+        infer_state.mem_is_contiguous = False
+        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+
+        infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
+
+        infer_state.int_index_list = infer_state.mem_index.tolist()
+        infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
-        predict_logics = self._token_forward(input_ids, infer_state)
+
+        predict_logics = self.opt_token_forward(input_ids, infer_state)
+
         return predict_logics
     
     @torch.no_grad()
@@ -308,72 +303,37 @@ class TpPartBaseModel:
         infer_state.create_inner_decode_infer_status()
         predict_logics = self._splitfuse_forward(input_ids, infer_state)
         return predict_logics
-    
-    # def all_layer_context_forward(self, input_embs, infer_state):
-    #     for i in range(self.layers_num):
-    #     # for i in range(1):
-    #         # input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-    #         input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-    #     # print("===============================================", flush=True)
-    #     # print("input_embs:", input_embs, flush=True)
-    #     # print("===============================================", flush=True)
-    #     return input_embs
 
     @record_function('_context_forward')
     @final
     def _context_forward(self, input_ids, infer_state: InferStateInfo):
-        cuda_input_ids = input_ids
         input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight)
-
-        # print("===============================================", flush=True)
-        # print("input_embs:", input_embs, flush=True)
-        # print("===============================================", flush=True)
-
-        # flag = True
-        # if flag:
         # for i in range(self.layers_num):
-        for i in range(32):
-            # input_embs = self.all_layer_context_forward(input_embs, infer_state)
-            # input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-            input_embs = self.layers_infer[i].opt_full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-            print("===============================================", flush=True)
-            print("input_embs:", input_embs, flush=True)
-            print("===============================================", flush=True)
-
-        # print("===============================================", flush=True)
-        # print(input_embs, flush=True)
-            
-        # for i in range(self.layers_num):
-        # for i in range(3):
-        #     # input_embs = self.layers_infer[i].context_forward(input_embs, infer_state, self.trans_layers_weight[i])
-        #     if infer_state.mem_is_contiguous:
-        #         cache_k = infer_state.mem_manager.key_buffer[i][infer_state.mem_start:infer_state.mem_end, :, :]
-        #         cache_v = infer_state.mem_manager.value_buffer[i][infer_state.mem_start:infer_state.mem_end, :, :]
-        #     else:
-        #         cache_k = infer_state.key_buffer
-        #         cache_v = infer_state.value_buffer
-        #     if i == 0:
-        #         input_embs, out, layer_weight_t= self.layers_infer[i].first_context_forward(input_embs, cache_k, cache_v, infer_state, self.trans_layers_weight[i])
-        #     # elif i == self.layers_num - 1:
-        #     elif i == 2:
-        #         input_embs = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t, True)
-        #     else:
-        #         input_embs, out, layer_weight_t = self.layers_infer[i].tmp_context_forward(input_embs, out, cache_k, cache_v, infer_state, self.trans_layers_weight[i], layer_weight_t)
+        for i in range(1):
+            input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
         
-        # predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
-        predict_logics = self.post_infer.opt_token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        
+        return predict_logics
+    
+    def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, current_len, max_seq_length, batch_size):
+        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
+        # for i in range(self.layers_num):
+        for i in range(1):
+            input_embs= self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length)
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True)
         
         return predict_logics
 
     @record_function('_token_forward')
     @final
     def _token_forward(self, input_ids, infer_state: InferStateInfo):
-        cuda_input_ids = input_ids
-        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        # for i in range(self.layers_num):
-        for i in range(3):
-            input_embs = self.layers_infer[i].token_forward(input_embs, infer_state, self.trans_layers_weight[i])
-        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+        with record_function('token_forward_with_pre_post_process'):
+            batch_size = infer_state.batch_size
+            cuda_input_ids = input_ids
+            assert infer_state.batch_size == 1
+            predict_logics = self.all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, infer_state.int_index_list[0], self.max_seq_length, batch_size)
+
         return predict_logics
     
     @final
@@ -384,5 +344,3 @@ class TpPartBaseModel:
             input_embs = self.layers_infer[i].splitfuse_forward(input_embs, infer_state, self.trans_layers_weight[i])
         predict_logics = self.post_infer.splitfuse_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
         return predict_logics
-
-    

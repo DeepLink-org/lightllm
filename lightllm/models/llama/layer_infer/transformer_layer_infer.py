@@ -1,10 +1,13 @@
 import torch
 import torch.functional as F
 import torch.distributed as dist
+import torch._dynamo as dynamo
 import numpy as np
 from typing import Tuple
 from functools import partial
+from torch.profiler import record_function
 
+from dicp.vendor.AscendGraph import ext_ops
 from lightllm.models.llama.layer_weights.transformer_layer_weight import LlamaTransformerLayerWeight
 from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd
 from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd
@@ -16,9 +19,6 @@ from lightllm.models.llama.infer_struct import LlamaInferStateInfo
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 from lightllm.common.basemodel import TransformerLayerInferTpl
 
-from torch.profiler import record_function
-
-from lightllm import ext_ops
 
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
@@ -35,11 +35,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
 
-        self.compiled_get_qkv = torch.compile(self.real_get_qkv, backend='ascendgraph', dynamic=False)
-        self.compiled_get_o  = torch.compile(self.real_get_o, backend='ascendgraph', dynamic=False)
-        self.compiled_ffn = torch.compile(self.real_ffn, backend='ascendgraph', dynamic=False)
-        self.compiled_context_attention_kernel= torch.compile(self._context_attention_kernel, backend='ascendgraph', dynamic=False)
+        self.opt_context_pre_process = torch.compile(self.context_pre_process, backend='ascendgraph', dynamic=False)
+        self.opt_context_post_process = torch.compile(self.context_post_process, backend='ascendgraph', dynamic=False)
+        self.opt_token_pre_process = torch.compile(self.token_pre_process, backend='ascendgraph', dynamic=False)
+        self.opt_token_post_process = torch.compile(self.token_post_process, backend='ascendgraph', dynamic=False)
+        self.opt_ascend_prompt_attention_inference = torch.compile(self.ascend_prompt_attention_kernel, backend='ascendgraph', dynamic=False)
+        self.opt_ascend_incre_attention_kernel = torch.compile(self.ascend_incre_attention_kernel, backend='ascendgraph', dynamic=False)
         self.opt_full_context_attention= torch.compile(self.full_context_attention, backend='ascendgraph', dynamic=False)
+        self.opt_full_token_attention= torch.compile(self.full_token_attention, backend='ascendgraph', dynamic=False)
 
         return
     
@@ -49,125 +52,102 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return
     
     def _bind_norm(self):
-        # self._att_norm = partial(LlamaTransformerLayerInfer._att_norm, self)
-        # self._ffn_norm = partial(LlamaTransformerLayerInfer._ffn_norm, self)
         self._att_norm = self._att_norm
         self._ffn_norm = self._ffn_norm
         return
     
     def _bind_attention(self):
-        # self._context_attention_kernel = partial(LlamaTransformerLayerInfer._context_attention_kernel, self)
-        # if "ppl_int8kv" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_ppl_int8kv, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_ppl_int8kv, self)
-        # elif "ppl_fp16" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_ppl_fp16, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # elif "ppl_fp16_flashdecoding" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_ppl_fp16_flashdecoding, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # elif "triton_int8kv" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_int8kv, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_int8kv, self)
-        # elif "triton_flashdecoding" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_flashdecoding, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # elif "triton_gqa_attention" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_gqa_attention_normal, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # elif "triton_gqa_flashdecoding" in self.mode:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_gqa_flashdecoding, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # else:
-        #     self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_normal, self)
-        #     self._copy_kv_to_mem_cache = partial(LlamaTransformerLayerInfer._copy_kv_to_mem_cache_normal, self)
-        # self._token_attention_kernel = partial(LlamaTransformerLayerInfer._token_decode_attention_normal, self)
-        
-        # # bind splitfuse attention
-        # if "triton_int8kv" in self.mode:
-        #     self._splitfuse_attention_kernel = partial(LlamaTransformerLayerInfer._splitfuse_attention_kernel_int8kv, self)
-        # else:
-        #     self._splitfuse_attention_kernel = partial(LlamaTransformerLayerInfer._splitfuse_attention_kernel, self)
-
         self._context_attention_kernel = self._context_attention_kernel
         self._token_attention_kernel = self._token_decode_attention_normal
         self._copy_kv_to_mem_cache = self._copy_kv_to_mem_cache_normal
 
         return
-
-    @record_function('transformer_att_norm')
-    def _att_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return rmsnorm_forward(input, weight=layer_weight.att_norm_weight_, eps=self.eps_)
     
-    @record_function('transformer_ffn_norm')
-    def _ffn_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return rmsnorm_forward(input, weight=layer_weight.ffn_norm_weight_, eps=self.eps_)
-
-    def real_get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        # print("debug info: ", cache_k.shape, input.shape, self.embed_dim_, layer_weight.k_weight_.shape, flush=True)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_, 
-                 out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
-        # t =  torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
-        # cache_k = t.reshape(cache_k.shape)
-
-        rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
-        # t = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
-        # cache_v = t.reshape(cache_v.shape)
-        return q, cache_k, cache_v
-
-    @record_function('transformer_get_qkv')
-    def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        q, cache_k, cache_v = self.compiled_get_qkv(input, cache_k, cache_v, infer_state, layer_weight)
-        return q, cache_k, cache_v
+    def _copy_kv_to_mem_cache_normal(self, key_buffer, value_buffer, mem_index, mem_manager):
+        destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
+        destindex_copy_kv(value_buffer, mem_index, mem_manager.value_buffer[self.layer_num_])
+        return
     
-    def dump_tensor(self, x, name):
-        import pickle
-        with open(f"/data2/zhoushenglong/tmp/{name}.pkl", "wb") as f:
-            if isinstance(x, torch.Tensor):
-                pickle.dump(x.cpu(), f)
-            else:
-                pickle.dump(x, f)
+    @record_function('transformer_context_attention_kernel')
+    def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
+        o_tensor1 = torch.empty_like(q) if out is None else out
+        o_tensor = context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
+                              k.view(-1, self.tp_k_head_num_, self.head_dim_),
+                              v.view(-1, self.tp_v_head_num_, self.head_dim_),
+                              o_tensor1.view(-1, self.tp_q_head_num_, self.head_dim_),
+                              infer_state.b_start_loc,
+                              infer_state.b_seq_len,
+                              infer_state.max_len_in_batch,
+                              infer_state.masks,
+                              infer_state.is_padding)
+        return o_tensor
+    
+    @record_function('transformer_token_decode_attention_normal')
+    def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
+        total_token_num = infer_state.total_token_num
+        batch_size = infer_state.batch_size
+        calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
+        
+        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
 
+        att_m_tensor = token_att_fwd(q.view(calcu_shape1),
+                        infer_state.mem_manager.key_buffer[self.layer_num_],
+                        att_m_tensor1,
+                        infer_state.req_manager.req_to_token_indexs,
+                        infer_state.b_req_idx,
+                        infer_state.b_start_loc,
+                        infer_state.b_seq_len,
+                        infer_state.max_len_in_batch)
+        
+        o_tensor1 = torch.empty_like(q) if out is None else out
+
+        o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
+                                infer_state.mem_manager.value_buffer[self.layer_num_],
+                                o_tensor1.view(calcu_shape1),
+                                infer_state.is_padding,
+                                infer_state.masks,
+                                infer_state.req_manager.req_to_token_indexs,
+                                infer_state.b_req_idx,
+                                infer_state.b_start_loc,
+                                infer_state.b_seq_len,
+                                infer_state.max_len_in_batch,
+                                infer_state.other_kv_index)
+        return o_tensor.view(q.shape)
+    
     def torch_rotary_emb(self, x, cos, sin):
         out = torch.ops.lightllm.rotary_emb.default(x, cos, sin)
         return out
     
-    def pre_process(self, input_embdings, infer_state, layer_weight):
+    def ascend_prompt_attention_kernel(self, q, k, v, seqlen, num_head , head_dim):
+        return torch.ops.lightllm.prompt_attention_inference.default(q, k, v, seqlen, num_head, head_dim)
+    
+    def ascend_incre_attention_kernel(self, q, k, v, int_index_list, max_seq_length):
+        return torch.ops.lightllm.flash_attention_inference.default(q, k, v, int_index_list, max_seq_length)
+
+    def context_pre_process(self, input_embdings, infer_state, layer_weight):
         # att_norm
-        input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.att_norm_weight_
-        # input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+        input1 = torch.ops.lightllm.rms_norm.default(input_embdings.float(), layer_weight.att_norm_weight_.float(), self.eps_).half()
         
         # pre_cache_kv
         cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
         cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
-        # import pdb; pdb.set_trace()
 
         # get_qkv
         q = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        # q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
 
-        # torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_,
-        #             out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
         cache_k = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.k_weight_).view(-1, self.tp_k_head_num_, self.head_dim_)
-        # cache_k.copy_(cache_k_t)
-        rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
-        # cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
+        cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
 
-        # torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_,
-        #             out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
         cache_v = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_).view(-1, self.tp_v_head_num_, self.head_dim_)
-        # cache_v.copy_(cache_v_t)
 
-        self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
+        # post cache_kv
+        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_v
 
         return q, cache_k, cache_v
 
-    def post_process(self, input_embdings, out, layer_weight):
+    def context_post_process(self, input_embdings, out, layer_weight):
         # get_o
         o = torch.mm(out.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
 
@@ -175,12 +155,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(o.view(-1, self.embed_dim_))
 
-        # print("===============================================", flush=True)
-        # print(input_embdings, flush=True)
-
         # ffn_norm
-        input1 = input_embdings * torch.rsqrt(input_embdings.pow(2).mean(-1, keepdim=True) + self.eps_) * layer_weight.ffn_norm_weight_
-        # input1 = torch.ops.lightllm.rms_norm.default(input_embdings, layer_weight.att_norm_weight_, self.eps_)
+        input1 = torch.ops.lightllm.rms_norm.default(input_embdings.float(), layer_weight.ffn_norm_weight_.float(), self.eps_).half()
 
         # ffn
         gate_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_proj)
@@ -196,358 +172,78 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         #     dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn2_out.view(-1, self.embed_dim_))
 
-        # print("===============================================", flush=True)
-        # print(input_embdings, flush=True)
-
         return input_embdings
-
-    # @record_function('full_context_attention')
+    
     def full_context_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
-            q, k, v = self.pre_process(input_embding, infer_state, layer_weight)
+        q, k, v = self.opt_context_pre_process(input_embding, infer_state, layer_weight)
 
-            # print("===============================================", flush=True)
-            # print(q.view(-1, self.tp_q_head_num_ * self.head_dim_))
-            # print(k)
-            # print(v)
-            # print(q.shape, k.shape, v.shape, flush=True)
-            # print("===============================================", flush=True)
+        q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
 
-            q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
-            # k = k.view(-1, self.tp_k_head_num_, self.head_dim_)
-            # v = v.view(-1, self.tp_v_head_num_, self.head_dim_)
+        batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
+        seqlen = infer_state.b_seq_len
 
-            batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
-            seqlen = infer_state.b_seq_len
+        out = self.opt_ascend_prompt_attention_inference(q.view(batch, -1, num_head * head_dim), 
+                                                            k.view(batch, -1, num_head * head_dim), 
+                                                            v.view(batch, -1, num_head * head_dim), 
+                                                            seqlen, num_head, head_dim)
 
-            # self.dump_tensor(q, "q2")
-            # self.dump_tensor(k, "k2")
-            # self.dump_tensor(v, "v2")
-            # print(batch, flush=True)
-            # print(num_head, flush=True)
-            # print(head_dim, flush=True)
+        out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
 
-            # out = torch.ops.lightllm.prompt_attention_inference.default(q, k, v, num_head, seqlen, infer_state.masks)
-            out = torch.ops.lightllm.prompt_attention_inference.default(q.view(batch, -1, num_head * head_dim), 
-                                                                        k.view(batch, -1, num_head * head_dim), 
-                                                                        v.view(batch, -1, num_head * head_dim), 
-                                                                        num_head, seqlen, infer_state.masks)
-            out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
-            
-            # print("===============================================", flush=True)
-            # print(out, flush=True)
-            # print(out.shape, flush=True)
-            # print(input_embding.shape, flush=True)
-            # print("===============================================", flush=True)
+        out = self.opt_context_post_process(input_embding, out, layer_weight)
 
-            out = self.post_process(input_embding, out, layer_weight)
-
-            return out
+        return out
     
-    @record_function('transformer_context_attention_kernel')
-    def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
-        # self.dump_tensor(q, "q")
-        # self.dump_tensor(infer_state.mem_manager.key_buffer[self.layer_num_], "all_k")
-        # self.dump_tensor(infer_state.mem_manager.value_buffer[self.layer_num_], "all_v")
-        # self.dump_tensor(infer_state.req_manager.req_to_token_indexs, "Req_to_tokens")
-        # self.dump_tensor(infer_state.b_req_idx, "B_req_idx")
-        # self.dump_tensor(infer_state.b_seq_len, "b_seq_len")
-        # self.dump_tensor(infer_state.max_len_in_batch, "max_input_len")
+    def token_pre_process(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
+        # att_norm
+        att_norm_out = torch.ops.lightllm.rms_norm.default(input_embding.float(), layer_weight.att_norm_weight_.float(), self.eps_).half()
+
+        # pre_kv
+        cache_k = infer_state.key_buffer
+        cache_v = infer_state.value_buffer 
+
+        # get_qkv
+        tmp_res = torch.mm(att_norm_out.view(-1, self.embed_dim_), layer_weight.qkv_weight_ )
+        (q, cache_k, cache_v) = torch.ops.aten.split(tmp_res, self.embed_dim_, dim=1)
+
+        q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
+        cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
+        cache_v = cache_v.view(-1, self.tp_v_head_num_, self.head_dim_)
+
+        # post cache_kv
+        start_index = infer_state.int_index_list[0]
+        end_index = infer_state.int_index_list[0] + 1
+        infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v
+
+        return q
+    
+    def token_post_process(self, o, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
+        # get_o
+        o = torch.mm(o.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+
+        input_embding.add_(o.view(-1, self.embed_dim_))
         
-        o_tensor1 = torch.empty_like(q) if out is None else out
-        o_tensor = context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
-                              k.view(-1, self.tp_k_head_num_, self.head_dim_),
-                              v.view(-1, self.tp_v_head_num_, self.head_dim_),
-                              o_tensor1.view(-1, self.tp_q_head_num_, self.head_dim_),
-                              infer_state.b_start_loc,
-                              infer_state.b_seq_len,
-                              infer_state.max_len_in_batch,
-                              infer_state.masks,
-                              infer_state.is_padding)
-        return o_tensor
-    
-    # def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
-    #     o_tensor = torch.empty_like(q) if out is None else out
-    #     infer_state.start_event.record(torch.cuda.default_stream())
-    #     if infer_state.decode_req_num > 0:
-    #         self._token_attention_kernel(q[0 : infer_state.decode_req_num, :], 
-    #                                     infer_state.inner_decode_infer_status, 
-    #                                     layer_weight, 
-    #                                     out=o_tensor[0 : infer_state.decode_req_num, :])
-    #     calcu_shape1 = (-1, self.tp_q_head_num_, self.head_dim_)
-    #     if infer_state.prefill_req_num > 0:
-    #         infer_state.parrall_stream.wait_event(infer_state.start_event)
-    #         # infer_state.start_event.wait(infer_state.parrall_stream)
-    #         with torch.cuda.stream(infer_state.parrall_stream):
-    #             # assert torch.cuda.current_stream().cuda_stream == infer_state.parrall_stream.cuda_stream
-    #             splitfuse_context_attention_fwd(q[infer_state.decode_req_num:, :].view(calcu_shape1),
-    #                                             infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                                             infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                                             o_tensor[infer_state.decode_req_num:, :].view(calcu_shape1),
-    #                                             infer_state.prefill_req_num,
-    #                                             infer_state.req_manager.req_to_token_indexs,
-    #                                             infer_state.prefill_b_req_idx,
-    #                                             infer_state.prefill_b_split_start_loc,
-    #                                             infer_state.prefill_b_split_seq_len,
-    #                                             infer_state.prefill_b_seq_len,
-    #                                             infer_state.prefill_max_split_seq_len_in_batch)
-    #         infer_state.end_event.record(infer_state.parrall_stream)
-    #         torch.cuda.default_stream().wait_event(infer_state.end_event)
-    #         # infer_state.event.wait(torch.cuda.default_stream())
-    #         # assert torch.cuda.current_stream().cuda_stream == torch.cuda.default_stream().cuda_stream
-    #         # assert torch.cuda.default_stream().cuda_stream != infer_state.parrall_stream.cuda_stream 
-    #     return o_tensor
+        # ffn_norm
+        input1 = torch.ops.lightllm.rms_norm.default(input_embding.float(), layer_weight.ffn_norm_weight_.float(), self.eps_).half()
+        
+        tmp_res = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_up_proj )
+        (gate_out, up_out) = torch.ops.aten.split(tmp_res, layer_weight.gate_up_proj.size()[1] // 2, dim=1)
+        
+        gate_out = torch.nn.functional.silu(gate_out)
 
-    # def _splitfuse_attention_kernel_int8kv(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
-    #     o_tensor = torch.empty_like(q) if out is None else out
-    #     infer_state.start_event.record(torch.cuda.default_stream())
-    #     if infer_state.decode_req_num > 0:
-    #         self._token_attention_kernel(q[0 : infer_state.decode_req_num, :], 
-    #                                     infer_state.inner_decode_infer_status, 
-    #                                     layer_weight, 
-    #                                     out=o_tensor[0 : infer_state.decode_req_num, :])
-    #     calcu_shape1 = (-1, self.tp_q_head_num_, self.head_dim_)
-    #     if infer_state.prefill_req_num > 0:
-    #         infer_state.parrall_stream.wait_event(infer_state.start_event)
-    #         with torch.cuda.stream(infer_state.parrall_stream):
-    #             splitfuse_context_attention_fwd_int8kv(q[infer_state.decode_req_num:, :].view(calcu_shape1),
-    #                                             infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                                             infer_state.mem_manager.key_scale_buffer[self.layer_num_],
-    #                                             infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                                             infer_state.mem_manager.value_scale_buffer[self.layer_num_],
-    #                                             o_tensor[infer_state.decode_req_num:, :].view(calcu_shape1),
-    #                                             infer_state.prefill_req_num,
-    #                                             infer_state.req_manager.req_to_token_indexs,
-    #                                             infer_state.prefill_b_req_idx,
-    #                                             infer_state.prefill_b_split_start_loc,
-    #                                             infer_state.prefill_b_split_seq_len,
-    #                                             infer_state.prefill_b_seq_len,
-    #                                             infer_state.prefill_max_split_seq_len_in_batch)
-    #         infer_state.end_event.record(infer_state.parrall_stream)
-    #         torch.cuda.default_stream().wait_event(infer_state.end_event)
-    #     return o_tensor
-    
-    def real_get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
-        return o_tensor
-    
-    @record_function('transformer_get_o')
-    def _get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return self.compiled_get_o(input, infer_state, layer_weight)
-
-    def real_ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        gate_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.gate_proj)
-        torch.nn.functional.silu(gate_out, inplace=True)
-        up_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.up_proj)
-        input = None
+        input1 = None
         ffn1_out = gate_out * up_out
         gate_out, up_out = None, None
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
-        return ffn2_out
 
-    @record_function('transformer_ffn')
-    def _ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return self.compiled_ffn(input, infer_state, layer_weight)
-    
-    def _copy_kv_to_mem_cache_normal(self, key_buffer, value_buffer, mem_index, mem_manager):
-        destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
-        destindex_copy_kv(value_buffer, mem_index, mem_manager.value_buffer[self.layer_num_])
-        return
-    
-    # def _copy_kv_to_mem_cache_int8kv(self, key_buffer, value_buffer, mem_index, mem_manager):
-    #     destindex_copy_quantize_kv(key_buffer,
-    #                                 mem_index,
-    #                                 mem_manager.key_buffer[self.layer_num_],
-    #                                 mem_manager.key_scale_buffer[self.layer_num_])
-    #     destindex_copy_quantize_kv(value_buffer,
-    #                                 mem_index,
-    #                                 mem_manager.value_buffer[self.layer_num_],
-    #                                 mem_manager.value_scale_buffer[self.layer_num_])
-    #     return
-    
-    # def _copy_kv_to_mem_cache_ppl_int8kv(self, key_buffer, value_buffer, mem_index, mem_manager):
-    #     from lightllm.models.llama.triton_kernel.ppl_quant_copy_kv import destindex_copy_quantize_kv
-    #     destindex_copy_quantize_kv(key_buffer,
-    #                                 mem_index,
-    #                                 mem_manager.key_buffer[self.layer_num_],
-    #                                 mem_manager.key_scale_buffer[self.layer_num_])
-    #     destindex_copy_quantize_kv(value_buffer,
-    #                                 mem_index,
-    #                                 mem_manager.value_buffer[self.layer_num_],
-    #                                 mem_manager.value_scale_buffer[self.layer_num_])
-    #     return
+        input_embding.add_(ffn2_out.view(-1, self.embed_dim_))
 
-    @record_function('transformer_token_decode_attention_normal')
-    def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-        total_token_num = infer_state.total_token_num
-        batch_size = infer_state.batch_size
-        calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-        
-        att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
+        return input_embding
 
-        with record_function("token_att_fwd"):
-            t = att_m_tensor = token_att_fwd(q.view(calcu_shape1),
-                        infer_state.mem_manager.key_buffer[self.layer_num_],
-                        att_m_tensor1,
-                        infer_state.req_manager.req_to_token_indexs,
-                        infer_state.b_req_idx,
-                        infer_state.b_start_loc,
-                        infer_state.b_seq_len,
-                        infer_state.max_len_in_batch)
-        
-        o_tensor1 = torch.empty_like(q) if out is None else out
-
-        pass
-        if infer_state.is_padding:
-            att_m_tensor[:, :] += infer_state.masks.reshape(-1)
-        #     pass
-        # if triton.__version__ == "2.0.0":
-        #     prob = torch.empty_like(att_m_tensor)
-        #     token_softmax_fwd(att_m_tensor, infer_state.b_start_loc, infer_state.b_seq_len, prob, infer_state.max_len_in_batch)
-        #     att_m_tensor = None
-        #     token_att_fwd2(prob,
-        #                 infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                 o_tensor.view(calcu_shape1),
-        #                 infer_state.req_manager.req_to_token_indexs,
-        #                 infer_state.b_req_idx,
-        #                 infer_state.b_start_loc,
-        #                 infer_state.b_seq_len)
-        #     prob = None
-        #     return o_tensor
-        # elif triton.__version__ >= "2.1.0":
-        #     from lightllm.models.llama.triton_kernel.token_attention_softmax_and_reducev import token_softmax_reducev_fwd
-        #     token_softmax_reducev_fwd(att_m_tensor, 
-        #                               infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                               o_tensor.view(calcu_shape1),
-        #                               infer_state.req_manager.req_to_token_indexs,
-        #                               infer_state.b_req_idx,
-        #                               infer_state.b_start_loc,
-        #                               infer_state.b_seq_len,
-        #                               infer_state.other_kv_index)
-        #     return o_tensor
-        # else:
-        #     raise Exception("not support triton version")
-        with record_function("token_softmax_reducev_fwd"):
-            o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
-                                    infer_state.mem_manager.value_buffer[self.layer_num_],
-                                    o_tensor1.view(calcu_shape1),
-                                    infer_state.is_padding,
-                                    infer_state.masks,
-                                    infer_state.req_manager.req_to_token_indexs,
-                                    infer_state.b_req_idx,
-                                    infer_state.b_start_loc,
-                                    infer_state.b_seq_len,
-                                    infer_state.max_len_in_batch,
-                                    infer_state.other_kv_index)
-        # return o_tensor
-        return o_tensor.view(q.shape)
-    
-    # def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     batch_size = infer_state.batch_size
-    #     calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-    #     # 对 gqa模型进行推理优化的代码
-    #     from ..triton_kernel.gqa_decode_flashattention_nopad import gqa_decode_attention_fwd
-    #     o_tensor = torch.empty_like(q) if out is None else out
-    #     gqa_decode_attention_fwd(
-    #                 q.view(calcu_shape1),
-    #                 infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                 infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                 o_tensor.view(calcu_shape1),
-    #                 infer_state.req_manager.req_to_token_indexs,
-    #                 infer_state.b_req_idx,
-    #                 infer_state.b_seq_len)
-    #     return o_tensor
-
-    # def _token_decode_attention_int8kv(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     total_token_num = infer_state.total_token_num
-    #     batch_size = infer_state.batch_size
-    #     calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-    #     att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
-    #     token_att_fwd_int8k(q.view(calcu_shape1),
-    #                         infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                         infer_state.mem_manager.key_scale_buffer[self.layer_num_],
-    #                         att_m_tensor,
-    #                         infer_state.req_manager.req_to_token_indexs,
-    #                         infer_state.b_req_idx,
-    #                         infer_state.b_start_loc,
-    #                         infer_state.b_seq_len,
-    #                         infer_state.max_len_in_batch)
-
-    #     prob = torch.empty_like(att_m_tensor)
-    #     token_softmax_fwd(att_m_tensor, infer_state.b_start_loc, infer_state.b_seq_len, prob, infer_state.max_len_in_batch)
-    #     att_m_tensor = None
-
-    #     o_tensor = torch.empty_like(q) if out is None else out
-    #     token_att_fwd2_int8v(prob,
-    #                             infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                             infer_state.mem_manager.value_scale_buffer[self.layer_num_],
-    #                             o_tensor.view(calcu_shape1),
-    #                             infer_state.req_manager.req_to_token_indexs,
-    #                             infer_state.b_req_idx,
-    #                             infer_state.b_start_loc,
-    #                             infer_state.b_seq_len,
-    #                             infer_state.max_len_in_batch)
-    #     prob = None
-    #     return o_tensor
-    
-    # def _token_decode_attention_flashdecoding(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     from lightllm.models.llama.triton_kernel.flash_decoding import token_decode_attention_flash_decoding
-    #     cache_k = infer_state.mem_manager.key_buffer[self.layer_num_]
-    #     cache_v = infer_state.mem_manager.value_buffer[self.layer_num_]
-    #     return token_decode_attention_flash_decoding(q, infer_state, self.tp_q_head_num_, self.head_dim_, cache_k, cache_v, out=out)
-    
-    # def _token_decode_attention_gqa_flashdecoding(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     # 对 gqa 模型进行推理优化的代码
-    #     from ..triton_kernel.gqa_flash_decoding import gqa_token_decode_attention_flash_decoding
-    #     cache_k = infer_state.mem_manager.key_buffer[self.layer_num_]
-    #     cache_v = infer_state.mem_manager.value_buffer[self.layer_num_]
-    #     return gqa_token_decode_attention_flash_decoding(q, infer_state, self.tp_q_head_num_, self.head_dim_, cache_k, cache_v, out=out)
-        
-    # def _token_decode_attention_ppl_int8kv(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     batch_size = infer_state.batch_size
-    #     calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-    #     o_tensor = torch.empty_like(q) if out is None else out
-
-    #     from lightllm_ppl_kernel import group8_int8kv_decode_attention
-    #     # group_int8kv_decode_attention(at::Tensor o, at::Tensor q, at::Tensor k, at::Tensor k_s,  at::Tensor v,  at::Tensor v_s, at::Tensor b_loc, at::Tensor b_seq_len, int max_len_in_batch)
-    #     group8_int8kv_decode_attention(o_tensor.view(calcu_shape1),
-    #                                                       q.view(calcu_shape1),
-    #                                                       infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                                                       infer_state.mem_manager.key_scale_buffer[self.layer_num_],
-    #                                                       infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                                                       infer_state.mem_manager.value_scale_buffer[self.layer_num_],
-    #                                                       infer_state.req_manager.req_to_token_indexs,
-    #                                                       infer_state.b_req_idx,
-    #                                                       infer_state.b_seq_len,
-    #                                                       infer_state.max_len_in_batch)
-           
-    #     return o_tensor
-    
-    # def _token_decode_attention_ppl_fp16(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-    #     batch_size = infer_state.batch_size
-    #     calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-    #     o_tensor = torch.empty_like(q) if out is None else out
-    #     from lightllm_ppl_fp16_kernel import fp16_decode_attention
-    #     # group_int8kv_decode_attention(at::Tensor o, at::Tensor q, at::Tensor k, at::Tensor k_s,  at::Tensor v,  at::Tensor v_s, at::Tensor b_loc, at::Tensor b_seq_len, int max_len_in_batch)
-    #     fp16_decode_attention(o_tensor.view(calcu_shape1),
-    #                         1.0 / (self.head_dim_**0.5),
-    #                         q.view(calcu_shape1),
-    #                         infer_state.mem_manager.key_buffer[self.layer_num_],
-    #                         infer_state.mem_manager.value_buffer[self.layer_num_],
-    #                         infer_state.req_manager.req_to_token_indexs,
-    #                         infer_state.b_req_idx,
-    #                         infer_state.b_seq_len,
-    #                         infer_state.max_len_in_batch)
-           
-    #     return o_tensor
-    
-    # def _token_decode_attention_ppl_fp16_flashdecoding(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-        # from lightllm.models.llama.triton_kernel.ppl_fp16_flash_decoding import token_decode_attention_flash_decoding
-
-        # cache_k = infer_state.mem_manager.kv_buffer[self.layer_num_][:, 0 : self.tp_k_head_num_, :]
-        # cache_v = infer_state.mem_manager.kv_buffer[self.layer_num_][
-        #     :, self.tp_k_head_num_ : self.tp_k_head_num_ + self.tp_v_head_num_, :
-        # ]
-        # return token_decode_attention_flash_decoding(
-        #     q, infer_state, self.tp_q_head_num_, self.head_dim_, cache_k, cache_v, out=out
-        # )
+    def full_token_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, current_len, max_seq_length):
+        q = self.opt_token_pre_process(input_embding, infer_state, layer_weight)
+        o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.mem_manager.key_buffer[self.layer_num_], infer_state.mem_manager.value_buffer[self.layer_num_], infer_state.int_index_list_t, max_seq_length)
+        out = self.opt_token_post_process(o, input_embding, infer_state, layer_weight)
+        return out

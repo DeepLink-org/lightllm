@@ -22,27 +22,23 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
         self.eps_ = network_config["rms_norm_eps"]
         self.vocab_size_ = network_config["vocab_size"]
         self.embed_dim_ = network_config["n_embed"]
-        
-        # self.opt_post_token_forward = torch.compile(self.post_token_forward, backend='ascendgraph', dynamic=False)
-        self.opt_token_forward = torch.compile(self.token_forward, backend='ascendgraph', dynamic=False)
+
         return
     
     def _norm(self, input, final_norm_weight_) -> torch.Tensor:
-        # return rmsnorm_forward(input, final_norm_weight_, eps=self.eps_)
         return input * torch.rsqrt(input.pow(2).mean(-1, keepdim=True) + self.eps_) * final_norm_weight_
     
     @torch.compile(backend='ascendgraph', dynamic=False)
     def _slice_get_last_input(self, input_embdings, infer_state: LlamaInferStateInfo):
-        # if infer_state.is_splitfuse:
-        #     # for SplitFuse
-        #     batch_size = infer_state.batch_size
-        #     last_input = torch.empty((batch_size, self.embed_dim_), device=input_embdings.device, dtype=torch.float16)
-        #     tmp_ = torch.cat([torch.ones(infer_state.decode_req_num, dtype=torch.int32, device="cuda"), infer_state.prefill_b_split_seq_len], dim=0)
-        #     last_index = torch.cumsum(tmp_, dim=0, dtype=torch.long) - 1
-        #     last_input[:, :] = input_embdings[last_index, :]
-        #     return last_input, batch_size
+        if infer_state.is_splitfuse:
+            # for SplitFuse
+            batch_size = infer_state.batch_size
+            last_input = torch.empty((batch_size, self.embed_dim_), device=input_embdings.device, dtype=torch.float16)
+            tmp_ = torch.cat([torch.ones(infer_state.decode_req_num, dtype=torch.int32, device="cuda"), infer_state.prefill_b_split_seq_len], dim=0)
+            last_index = torch.cumsum(tmp_, dim=0, dtype=torch.long) - 1
+            last_input[:, :] = input_embdings[last_index, :]
+            return last_input, batch_size
         
-        # here prefill
         if not infer_state.is_splitfuse and infer_state.is_prefill and not infer_state.return_all_prompt_logprobs:
             batch_size = infer_state.batch_size
             last_input = torch.empty((batch_size, self.embed_dim_), device=input_embdings.device, dtype=torch.float16)
@@ -50,11 +46,10 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
             last_input[:, :] = input_embdings[last_index, :]
             return last_input, batch_size
 
-        # if not infer_state.is_splitfuse and infer_state.is_prefill and infer_state.return_all_prompt_logprobs:
-        #     total_tokens = infer_state.total_token_num
-        #     return input_embdings, total_tokens
+        if not infer_state.is_splitfuse and infer_state.is_prefill and infer_state.return_all_prompt_logprobs:
+            total_tokens = infer_state.total_token_num
+            return input_embdings, total_tokens
         
-        # here decode
         if not infer_state.is_splitfuse and not infer_state.is_prefill:
             batch_size = infer_state.batch_size
             return input_embdings[-batch_size:, :], batch_size
@@ -88,13 +83,17 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
             gather_data = None
             return ans_logics
 
-    @record_function('post_token_forward')
     def token_forward(self, input_embdings, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, return_logics=False):
         last_input, token_num = self._slice_get_last_input(input_embdings, infer_state)
-        # with record_function('compiled_post_token_forward'):
         out = self.post_token_forward(layer_weight.lm_head_weight_, layer_weight.final_norm_weight_, last_input, token_num, return_logics)
         return out
     
+    def dicp_token_forward(self, input_embdings, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, batch_size, return_logics=False):
+        last_input = input_embdings[-batch_size:, :]
+        token_num = batch_size
+        out = self.post_token_forward(layer_weight.lm_head_weight_, layer_weight.final_norm_weight_, last_input, token_num, return_logics)
+        return out
+
     @mark_cost_time("splitfuse post forward")
     def splitfuse_forward(self, input_embdings, infer_state: SplitFuseInferStateInfo, layer_weight: BaseLayerWeight, return_logics=False):
         return self.token_forward(input_embdings, infer_state, layer_weight, return_logics=return_logics)
