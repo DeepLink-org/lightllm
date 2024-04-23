@@ -116,6 +116,7 @@ class ReqQueue:
                     self.pause_req_dict.pop(req.request_id)
             else:
                 break
+            # break
 
         if len(can_run_list) != 0:
             new_batch = Batch(uuid.uuid4().hex, can_run_list)

@@ -143,7 +143,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8888/generate'
+    url = 'http://localhost:8899/generate'
       
     data = {
         'inputs': prompt,
@@ -183,9 +183,9 @@ async def benchmark(
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
-        # tasks.append(task)
-        await asyncio.gather(task)
-
+        tasks.append(task)
+        # await asyncio.gather(task)
+    await asyncio.gather(*tasks) # 异步
 
 def main(args: argparse.Namespace):
     print(args)

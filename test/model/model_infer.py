@@ -2,6 +2,7 @@ import numpy as np
 from multiprocessing import Queue
 import multiprocessing
 
+from contextlib import nullcontext
 from torch.autograd.profiler import record_function
 
 def test_model_inference(world_size, model_dir, model_class, batch_size, input_len, output_len, mode):
@@ -37,7 +38,6 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     import torch.distributed as dist
     rank_id = model_kvargs["tp_rank"]
     world_size = model_kvargs["world_size"]
-    print(f"hahaha rank_id={rank_id}")
     dist.init_process_group('nccl', init_method='tcp://127.0.0.1:28765', rank=rank_id, world_size=world_size)
     torch.cuda.set_device(rank_id)
 
@@ -46,6 +46,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     torch.cuda.empty_cache()
 
     model_part = model_class(model_kvargs)
+    print(f"rank_id {rank_id} model loaded")
     # warm up
     test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
     test_data = test_data.reshape(-1)
@@ -108,8 +109,10 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
 
     if rank_id == 0:
         import torch_dipu
-        path = "/data2/chenchiyu/pt211/lightllm/llama_profile_7B_b1_input256_output32/"
-        with torch_dipu.profiler.NativeProfile(path, False):
+        path = "/hwtest/chenchiyu/lightllm_dev/lightllm/llama_profile_70B_b8_input256_small/"
+        # context_dipu = torch_dipu.profiler.NativeProfile(path, False)
+        context = nullcontext()
+        with context:
         
             total_token_num = batch_size * input_len
             torch.cuda.synchronize()
@@ -126,6 +129,14 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
                 print("prefill time cost:", (time.time() - prefill_start_time) * 1000)
 
             for i in range(output_len):
+                # if i == 1:
+                #     context_dipu.__enter__()
+                #     a = torch.randn(2000, 5000).cuda()
+                #     b = torch.randn(5000, 20000).cuda()
+
+                #     for i in range(30):
+                #         result1 = torch.mm(a, b)
+                #         result2 = torch.nn.functional.relu(result1)
                 torch.cuda.synchronize()
                 step_start = time.time()
                 b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
@@ -141,6 +152,8 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
                 predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
                 predict_ids = predict_ids.detach().cpu().numpy()
                 torch.cuda.synchronize()
+                # if i == 1:
+                #     context_dipu.__exit__(None, None, None)
                 if i % 100 == 0 or i == output_len - 1:
                     if rank_id == 0:
                         print(i, "step cost time:", (time.time() - step_start) * 1000)

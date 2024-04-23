@@ -18,6 +18,7 @@ from .stats import Stats
 from .pause_strategy import Fcfs, select_paused_reqs
 from ..tokenizer import get_tokenizer
 from lightllm.utils.log_utils import init_logger
+from torch.profiler import record_function
 
 logger = init_logger(__name__)
 
@@ -140,11 +141,20 @@ class RouterManager:
         return
 
     async def loop_for_fwd(self,):
+        # import torch_dipu
         counter_count = 0
+        # batch_count = 0
+        # path = "/hwtest/chenchiyu/lightllm_dev/lightllm/llama_server_profile/"
+        # prof = torch_dipu.profiler.NativeProfile(path, False)
         while True:
             await self._step()
             counter_count += 1
             if self.running_batch is not None:
+                # batch_count += 1
+                # if batch_count == 1:
+                #     prof.__enter__()
+                # elif batch_count == 20:
+                #     prof.__exit__(None, None, None)
                 if counter_count % 50 == 0:
                     total_used_tokens = self.prompt_cache_used_tokens + self.running_batch.batch_used_tokens + self.req_queue.pause_req_used_tokens
                     token_ratio = total_used_tokens / self.max_total_token_num
@@ -170,11 +180,13 @@ class RouterManager:
             if new_batch is not None:
                 self.stats_tool.count_prompt_tokens(new_batch)
                 self.running_batch = new_batch
-                await self._prefill_batch(self.running_batch)
+                with record_function("_step_prefill"):
+                    await self._prefill_batch(self.running_batch)
                 self._filter_runing_batch()
                 self.has_wait_tokens = 0
             return
 
+        """
         # 有运行请求，但是已经到了可以调度新的请求合并推理的时机
         if self.has_wait_tokens >= self.max_wait_tokens:
             new_mini_batch = self.req_queue.generate_new_batch(self.running_batch)
@@ -186,14 +198,16 @@ class RouterManager:
                     await self._merge_batch(self.running_batch, new_mini_batch)
                     self.running_batch.merge(new_mini_batch)
                 return
+        """
 
         # 正常 decode 阶段， 如果可以直接decode就直接decode，否则通过暂停策略暂停一些请求
         # 释放一些管理的 token
         if self._can_decode(self.running_batch):
-            self.stats_tool.count_output_tokens(self.running_batch)
-            await self._decode_batch(self.running_batch)
-            self._filter_runing_batch()
-            self.has_wait_tokens += 1
+            with record_function("_step_normal_decode"):
+                self.stats_tool.count_output_tokens(self.running_batch)
+                await self._decode_batch(self.running_batch)
+                self._filter_runing_batch()
+                self.has_wait_tokens += 1
             return
         else:
             # pause strategy

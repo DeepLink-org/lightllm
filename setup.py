@@ -27,6 +27,6 @@ setup(
         "rpyc",
         "ninja",
         "safetensors",
-        "triton"
+        # "triton"
     ],
 )

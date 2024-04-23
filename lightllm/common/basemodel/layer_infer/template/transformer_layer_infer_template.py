@@ -6,6 +6,7 @@ from ...splitfuse_infer_struct import SplitFuseInferStateInfo
 from lightllm.utils.infer_utils import mark_cost_time
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 from typing import Tuple
+from torch.profiler import record_function
 
 
 class TransformerLayerInferTpl(TransformerLayerInfer):
@@ -29,6 +30,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     def _ffn_norm(self, input, infer_state:InferStateInfo, layer_weight)->torch.Tensor:
         raise Exception("need to impl")
     
+    @record_function("_pre_cache_kv")
     def _pre_cache_kv(self, infer_state:InferStateInfo, layer_weight)->Tuple[torch.Tensor, torch.Tensor]:
         if infer_state.mem_is_contiguous:
             cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
@@ -41,6 +43,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     def _get_qkv(self, input, cache_k, cache_v, infer_state:InferStateInfo, layer_weight)->Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise Exception("need to impl")
     
+    @record_function("_post_cache_kv")
     def _post_cache_kv(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
         mem_manager = infer_state.mem_manager
         if not infer_state.mem_is_contiguous:
@@ -103,9 +106,10 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._token_attention_kernel(q, infer_state, layer_weight)
         q = None
         o = self._get_o(o, infer_state, layer_weight)
-        if self.world_size_ > 1:
-            dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
-        input_embding.add_(o.view(-1, self.embed_dim_))
+        with record_function("post_get_o"):
+            if self.world_size_ > 1:
+                dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
+            input_embding.add_(o.view(-1, self.embed_dim_))
         return
 
     # this impl dont to use @mark_cost_time
@@ -113,9 +117,10 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
         input1 = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
-        input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
+        with torch.profiler.record_function("post_ffn"):
+            if self.world_size_ > 1:
+                dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
+            input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
     
     # @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why
