@@ -183,8 +183,8 @@ async def benchmark(
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
-        # tasks.append(task)
-        await asyncio.gather(task)
+        tasks.append(task)
+    await asyncio.gather(*tasks)
 
 
 def main(args: argparse.Namespace):
@@ -201,7 +201,7 @@ def main(args: argparse.Namespace):
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 128)
-    input_requests = [input_request for i in range(2)]
+    input_requests = [input_request for i in range(args.num_prompts)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))

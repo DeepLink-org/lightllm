@@ -6,10 +6,11 @@ from typing import Tuple
 from functools import partial
 # import triton
 
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.models.llama.layer_weights.transformer_layer_weight import LlamaTransformerLayerWeight
 from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd
 from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd#, token_att_fwd_int8k
-from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd, token_decode_attention_fwd
+from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd, token_decode_attention_fwd, paged_token_attention
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_reduceV import token_att_fwd2, token_att_fwd2_int8v
 from lightllm.models.llama.triton_kernel.rmsnorm import rmsnorm_forward
@@ -93,12 +94,16 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
         with torch.profiler.record_function("rotary_emb_fwd q"):
             rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        # torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
+                    # out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        cache_k = torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
+        cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
         with torch.profiler.record_function("rotary_emb_fwd k"):
             rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        # torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
+        #             out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        cache_v = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
+        cache_v = cache_v.view(-1, self.tp_k_head_num_, self.head_dim_)
         return q, cache_k, cache_v
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
@@ -221,55 +226,26 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        # att_m_tensor1 = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
-
-        # att_m_tensor = token_att_fwd(q.view(calcu_shape1),
-        #                 infer_state.mem_manager.key_buffer[self.layer_num_],
-        #                 att_m_tensor1,
-        #                 infer_state.req_manager.req_to_token_indexs,
-        #                 infer_state.b_req_idx,
-        #                 infer_state.b_start_loc,
-        #                 infer_state.b_seq_len,
-        #                 infer_state.max_len_in_batch)
-        
         o_tensor = torch.empty_like(q) if out is None else out
+        return paged_token_attention(q.view(calcu_shape1),
+                                infer_state.mem_manager.key_buffer[self.layer_num_],
+                                infer_state.mem_manager.value_buffer[self.layer_num_],
+                                o_tensor.view(calcu_shape1),
+                                infer_state.b_seq_len,
+                                infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
+                                PagingRequestManager.BLOCK_SIZE)
         
-        # if triton.__version__ == "2.0.0":
-        #     prob = torch.empty_like(att_m_tensor)
-        #     token_softmax_fwd(att_m_tensor, infer_state.b_start_loc, infer_state.b_seq_len, prob, infer_state.max_len_in_batch)
-        #     att_m_tensor = None
-        #     token_att_fwd2(prob,
-        #                 infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                 o_tensor.view(calcu_shape1),
-        #                 infer_state.req_manager.req_to_token_indexs,
-        #                 infer_state.b_req_idx,
-        #                 infer_state.b_start_loc,
-        #                 infer_state.b_seq_len)
-        #     prob = None
-        #     return o_tensor
-        # elif triton.__version__ >= "2.1.0":
-        #     from lightllm.models.llama.triton_kernel.token_attention_softmax_and_reducev import token_softmax_reducev_fwd
-        #     token_softmax_reducev_fwd(att_m_tensor, 
-        #                               infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                               o_tensor.view(calcu_shape1),
-        #                               infer_state.req_manager.req_to_token_indexs,
-        #                               infer_state.b_req_idx,
-        #                               infer_state.b_start_loc,
-        #                               infer_state.b_seq_len,
-        #                               infer_state.other_kv_index)
-        #     return o_tensor
-        # else:
-        #     raise Exception("not support triton version")
-        token_decode_attention_fwd(q.view(calcu_shape1),
-                                   infer_state.mem_manager.key_buffer[self.layer_num_],
-                                   infer_state.mem_manager.value_buffer[self.layer_num_],
-                                   o_tensor.view(calcu_shape1),
-                                   infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
-                                   infer_state.b_start_loc,
-                                   infer_state.b_seq_len,
-                                   infer_state.max_len_in_batch,
-                                   infer_state.other_kv_index)
-        return o_tensor
+       
+        # token_decode_attention_fwd(q.view(calcu_shape1),
+        #                            infer_state.mem_manager.key_buffer[self.layer_num_],
+        #                            infer_state.mem_manager.value_buffer[self.layer_num_],
+        #                            o_tensor.view(calcu_shape1),
+        #                            infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
+        #                            infer_state.b_start_loc,
+        #                            infer_state.b_seq_len,
+        #                            infer_state.max_len_in_batch,
+        #                            infer_state.other_kv_index)
+        # return o_tensor
 
         # o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
         #                             infer_state.mem_manager.value_buffer[self.layer_num_],
