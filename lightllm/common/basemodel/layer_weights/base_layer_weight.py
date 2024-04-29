@@ -6,6 +6,7 @@ import threading
 class BaseLayerWeight:
     def __init__(self):
         self.tp_rank_ = None
+        self.lock = threading.Lock()
 
     def load_hf_weights(self, weights):
         """
