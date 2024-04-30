@@ -1,6 +1,7 @@
 import torch
 import torch.functional as F
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch._dynamo as dynamo
 import numpy as np
 from typing import Tuple
@@ -147,12 +148,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
         return q, cache_k, cache_v
 
-    def context_post_process(self, input_embdings, out, layer_weight):
+    def context_post_process(self, input_embdings, out, layer_weight, default_pg):
         # get_o
         o = torch.mm(out.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
 
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
+        if self.world_size_ > 1:
+            o = funcol.all_reduce(o, "sum", default_pg)
         input_embdings.add_(o.view(-1, self.embed_dim_))
 
         # ffn_norm
@@ -168,13 +169,13 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
 
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(ffn2_out, op=dist.ReduceOp.SUM, async_op=False)
+        if self.world_size_ > 1:
+            ffn2_out = funcol.all_reduce(ffn2_out, "sum", default_pg)
         input_embdings.add_(ffn2_out.view(-1, self.embed_dim_))
 
         return input_embdings
     
-    def full_context_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
+    def full_context_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, default_pg):
         q, k, v = self.opt_context_pre_process(input_embding, infer_state, layer_weight)
 
         q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
@@ -189,7 +190,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
         out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
 
-        out = self.opt_context_post_process(input_embding, out, layer_weight)
+        out = self.opt_context_post_process(input_embding, out, layer_weight, default_pg)
 
         return out
     
@@ -200,14 +201,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         # pre_kv
         cache_k = infer_state.key_buffer
         cache_v = infer_state.value_buffer 
-
+        
         # get_qkv
-        tmp_res = torch.mm(att_norm_out.view(-1, self.embed_dim_), layer_weight.qkv_weight_ )
-        (q, cache_k, cache_v) = torch.ops.aten.split(tmp_res, self.embed_dim_, dim=1)
-
+        q = torch.mm(att_norm_out.view(-1, self.embed_dim_), layer_weight.q_weight_)
         q = self.torch_rotary_emb(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        cache_k = torch.mm(att_norm_out.view(-1, self.embed_dim_), layer_weight.k_weight_)
         cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
         cache_k = self.torch_rotary_emb(cache_k, infer_state.position_cos, infer_state.position_sin)
+        cache_v = torch.mm(att_norm_out.view(-1, self.embed_dim_), layer_weight.v_weight_)
         cache_v = cache_v.view(-1, self.tp_v_head_num_, self.head_dim_)
 
         # post cache_kv
@@ -218,9 +219,11 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
         return q
     
-    def token_post_process(self, o, input_embding, infer_state: LlamaInferStateInfo, layer_weight):
+    def token_post_process(self, o, input_embding, infer_state: LlamaInferStateInfo, layer_weight, default_pg):
         # get_o
         o = torch.mm(o.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+        if self.world_size_ > 1:
+            o = funcol.all_reduce(o, "sum", default_pg)
 
         input_embding.add_(o.view(-1, self.embed_dim_))
         
@@ -238,12 +241,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
         ffn1_out = None
 
+        if self.world_size_ > 1:
+            ffn2_out = funcol.all_reduce(ffn2_out, "sum", default_pg)
         input_embding.add_(ffn2_out.view(-1, self.embed_dim_))
 
         return input_embding
 
-    def full_token_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, current_len, max_seq_length):
+    def full_token_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, current_len, max_seq_length, default_pg=None):
         q = self.opt_token_pre_process(input_embding, infer_state, layer_weight)
         o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.mem_manager.key_buffer[self.layer_num_], infer_state.mem_manager.value_buffer[self.layer_num_], infer_state.int_index_list_t, max_seq_length)
-        out = self.opt_token_post_process(o, input_embding, infer_state, layer_weight)
+        out = self.opt_token_post_process(o, input_embding, infer_state, layer_weight, default_pg)
         return out

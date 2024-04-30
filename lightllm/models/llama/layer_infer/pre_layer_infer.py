@@ -1,5 +1,6 @@
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import numpy as np
 from torch.profiler import record_function
 
@@ -22,7 +23,7 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
 
         return
 
-    def pre_context_forward(self, input_ids, layer_weight):
+    def pre_context_forward(self, input_ids, layer_weight, default_pg=None):
         bool1 = input_ids.lt(self.vob_start_id_)
         bool2 = input_ids.ge(self.vob_end_id_)
         input_mask = torch.logical_or(bool1, bool2)
@@ -32,10 +33,10 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
         input_embdings = torch.embedding(layer_weight, tmp_input_ids, padding_idx=-1)
         input_embdings[input_mask] = 0.0
         if self.world_size_ > 1:
-            dist.all_reduce(input_embdings, op=dist.ReduceOp.SUM, async_op=False)
+            input_embdings = funcol.all_reduce(input_embdings, "sum", default_pg)
         return input_embdings
 
-    def pre_token_forward(self, input_ids, layer_weight):
+    def pre_token_forward(self, input_ids, layer_weight, default_pg=None):
         bool1 = input_ids.lt(self.vob_start_id_)
         bool2 = input_ids.ge(self.vob_end_id_)
         input_mask = torch.logical_or(bool1, bool2)
@@ -45,15 +46,15 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
 
         input_embdings[input_mask] = 0.0
         if self.world_size_ > 1:
-            dist.all_reduce(input_embdings, op=dist.ReduceOp.SUM, async_op=False)
+            input_embdings = funcol.all_reduce(input_embdings, "sum", default_pg)
         return input_embdings
 
-    def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight):
-        input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_)
+    def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg=None):
+        input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_, default_pg)
         return input_embdings
 
-    def token_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight):
-        input_embdings = self.pre_token_forward(input_ids, layer_weight.wte_weight_)
+    def token_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg=None):
+        input_embdings = self.pre_token_forward(input_ids, layer_weight.wte_weight_, default_pg)
         return input_embdings
     
     @mark_cost_time("splitfuse forward")
