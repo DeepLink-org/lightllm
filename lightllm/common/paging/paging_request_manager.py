@@ -65,7 +65,7 @@ class PagingRequestManager(ReqManager):
             req = self.req_map[int(req_idx[b_idx])]
             block_table = self.block_manager.get_block_table(req)
             block_idx = block_table[req.num_blocks() - 1]
-            last_block_offset = seq_len % PagingRequestManager.BLOCK_SIZE
+            last_block_offset = (seq_len - 1) % PagingRequestManager.BLOCK_SIZE
             cache_start = block_idx * PagingRequestManager.BLOCK_SIZE + last_block_offset
             self.mem_manager.key_buffer[layer_num][cache_start] = k[b_idx]
             self.mem_manager.value_buffer[layer_num][cache_start] = v[b_idx]
@@ -83,7 +83,7 @@ class PagingRequestManager(ReqManager):
 
             block_table = self.get_block_table(int(req_idx[b_idx]))
             block_number = _div_up(seq_len, PagingRequestManager.BLOCK_SIZE)
-            last_block_offset = seq_len % PagingRequestManager.BLOCK_SIZE
+            last_block_offset = seq_len - (block_number - 1) * PagingRequestManager.BLOCK_SIZE
             for num in range(block_number):
                 block_idx = block_table[num]
                 offset = last_block_offset if block_number - 1 == num else PagingRequestManager.BLOCK_SIZE

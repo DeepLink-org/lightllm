@@ -109,7 +109,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
 
     if rank_id == 0:
         import torch_dipu
-        path = "/data01/zhaochaoxing/work/pt210/lightllm/tmp/"
+        path = "./tmp/"
         with torch_dipu.profiler.NativeProfile(path, False):
         
             total_token_num = batch_size * input_len
@@ -118,6 +118,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
+         
 
             torch.cuda.synchronize()
             if rank_id == 0:

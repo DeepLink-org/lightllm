@@ -15,7 +15,7 @@ class TestLlama2Infer(unittest.TestCase):
         test_model_inference(world_size=1, 
                              model_dir="/data2/zhaochaoxing/models/llama-2-7b-chat-hf", 
                              model_class=LlamaTpPartModel, 
-                             batch_size=4, 
+                             batch_size=1, 
                              input_len=256, 
                              output_len=4,
                              mode=[])

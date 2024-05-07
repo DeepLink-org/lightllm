@@ -92,16 +92,26 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        with torch.profiler.record_function("rotary_emb_fwd q"):
-            rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        # with torch.profiler.record_function("rotary_emb_fwd q"):
+            # rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
         # torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
                     # out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
         cache_k = torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
         cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
-        with torch.profiler.record_function("rotary_emb_fwd k"):
-            rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
+        # with torch.profiler.record_function("rotary_emb_fwd k"):
+            # rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
         # torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
         #             out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+        import deeplink_ext.cpp_extensions as ext
+        pos_shape = infer_state.position_cos.shape
+        with torch.profiler.record_function("rotary fuse qk"):
+            ext.rotary_embedding_v2(
+                q.view(-1, self.tp_q_head_num_, self.head_dim_),
+                cache_k,
+                infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+                infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+            )
+
         cache_v = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
         cache_v = cache_v.view(-1, self.tp_k_head_num_, self.head_dim_)
         return q, cache_k, cache_v
@@ -227,14 +237,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
         o_tensor = torch.empty_like(q) if out is None else out
-        return paged_token_attention(q.view(calcu_shape1),
+        paged_token_attention(q.view(calcu_shape1),
                                 infer_state.mem_manager.key_buffer[self.layer_num_],
                                 infer_state.mem_manager.value_buffer[self.layer_num_],
                                 o_tensor.view(calcu_shape1),
                                 infer_state.b_seq_len,
                                 infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
-        
+        return o_tensor
        
         # token_decode_attention_fwd(q.view(calcu_shape1),
         #                            infer_state.mem_manager.key_buffer[self.layer_num_],
