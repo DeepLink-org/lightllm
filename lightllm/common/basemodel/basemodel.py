@@ -175,22 +175,22 @@ class TpPartBaseModel:
 
         print(f"prefill batch size:{batch_size}")
 
-        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, self.max_seq_length*batch_size)
-        if alloc_mem is not None:
-            infer_state.mem_is_contiguous = True
-            infer_state.mem_index = alloc_mem[0]
-            infer_state.mem_start = alloc_mem[1]
-            infer_state.mem_end = alloc_mem[2]
+        # alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, self.max_seq_length*batch_size)
+        # if alloc_mem is not None:
+        #     infer_state.mem_is_contiguous = True
+        #     infer_state.mem_index = alloc_mem[0]
+        #     infer_state.mem_start = alloc_mem[1]
+        #     infer_state.mem_end = alloc_mem[2]
 
         # else:
         # infer_state.mem_is_contiguous = False
         # alloc_mem = self.mem_manager.alloc(infer_state.total_token_num)
         # infer_state.mem_index = alloc_mem
-        # infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        # infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
     
-        init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
-                            max_len_in_batch, infer_state.mem_index, self.max_seq_length)
+        # init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
+        #                     max_len_in_batch, infer_state.mem_index, self.max_seq_length)
 
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._context_forward(input_ids, infer_state)
@@ -217,7 +217,7 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
+        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
 
         '''
         alloc_mem = self.mem_manager.alloc_contiguous(batch_size)

@@ -15,7 +15,7 @@ logger = init_logger(__name__)
 
     
 class PagingRequestManager(ReqManager):
-    BLOCK_SIZE = 128
+    BLOCK_SIZE = 64
     def __init__(self, max_request_num, max_sequence_length, mem_manager):
         self.req_state = torch.zeros((max_request_num,), dtype=torch.bool, device="cuda")
         self.req_to_token_indexs = torch.zeros((max_request_num, max_sequence_length), dtype=torch.int32, device="cuda")
@@ -46,7 +46,18 @@ class PagingRequestManager(ReqManager):
     
     def get_batched_block_table(self, req_idx: Tensor):
         batch = req_idx.shape[0]
-        return torch.from_numpy(numpy.array([self.get_block_table(int(req_idx[i])) for i in range(batch)])).cuda().to(torch.int32)
+        table = [ self.get_block_table(int(req_idx[i])) for i in range(batch) ]
+        length = [ len(t) for t in table]
+        max_len = max(length)
+        padding_table = []
+        for t in table:
+            if len(t) < max_len:
+                tmp = [-1 for i in range(max_len - len(t))]
+                padding_table.append(numpy.append(t, tmp))
+            else:
+                padding_table.append(t)
+        # print(f"table:{table}, max_len:{max_len}, length:{length}")
+        return torch.from_numpy(numpy.array(padding_table)).cuda().to(torch.int32)
         
 
     def fill_kv_cache(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):

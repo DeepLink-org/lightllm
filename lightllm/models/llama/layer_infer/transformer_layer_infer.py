@@ -241,14 +241,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        # o_pa = torch.empty_like(q) if out is None else out
-        # paged_token_attention(q.view(calcu_shape1),
-        #                         infer_state.mem_manager.key_buffer[self.layer_num_],
-        #                         infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                         o_pa.view(calcu_shape1),
-        #                         infer_state.seq_len_list,
-        #                         infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
-        #                         PagingRequestManager.BLOCK_SIZE)
+        o_pa = torch.empty_like(q) if out is None else out
+        paged_token_attention(q.view(calcu_shape1),
+                                infer_state.mem_manager.key_buffer[self.layer_num_],
+                                infer_state.mem_manager.value_buffer[self.layer_num_],
+                                o_pa.view(calcu_shape1),
+                                infer_state.seq_len_list,
+                                infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
+                                PagingRequestManager.BLOCK_SIZE)
         
         # if (self.layer_num_ <= 0) and int(infer_state.b_seq_len[0]) >= 129 and int(infer_state.b_seq_len[0]) <= 129:
         #         print(f"layer:{self.layer_num_},  seqlen:{int(infer_state.b_seq_len[0])}")
@@ -262,16 +262,16 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         #         print(f"out:{o_tensor}")
         
        
-        o_tensor = torch.empty_like(q) if out is None else out
-        token_decode_attention_fwd(q.view(calcu_shape1),
-                                   infer_state.mem_manager.key_buffer[self.layer_num_],
-                                   infer_state.mem_manager.value_buffer[self.layer_num_],
-                                   o_tensor.view(calcu_shape1),
-                                   infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
-                                   infer_state.b_start_loc,
-                                   infer_state.b_seq_len,
-                                   infer_state.max_len_in_batch,
-                                   infer_state.other_kv_index)
+        # o_tensor = torch.empty_like(q) if out is None else out
+        # token_decode_attention_fwd(q.view(calcu_shape1),
+        #                            infer_state.mem_manager.key_buffer[self.layer_num_],
+        #                            infer_state.mem_manager.value_buffer[self.layer_num_],
+        #                            o_tensor.view(calcu_shape1),
+        #                            infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
+        #                            infer_state.b_start_loc,
+        #                            infer_state.b_seq_len,
+        #                            infer_state.max_len_in_batch,
+        #                            infer_state.other_kv_index)
         # import pdb; pdb.set_trace()
         # if not torch.allclose(o_pa.view(-1).cpu(), o_tensor.view(-1).cpu(), rtol=1e-2, atol=1e-2):
         #     print(f"layer:{self.layer_num_},  seqlen:{int(infer_state.b_seq_len[0])}")
@@ -285,7 +285,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         #     print(f"maxlen:{infer_state.max_len_in_batch}")
         #     import pdb; pdb.set_trace()
         #     quit()
-        return o_tensor
+        return o_pa
 
         # o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
         #                             infer_state.mem_manager.value_buffer[self.layer_num_],
