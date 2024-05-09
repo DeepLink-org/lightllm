@@ -230,7 +230,9 @@ class ModelRpcServer(rpyc.Service):
         
         if len(run_reqs) >= 1:
             logits = self.model.forward(**kwargs)
+            torch.cuda.synchronize()
             next_token_ids, next_token_probs = sample(logits, run_reqs)
+            torch.cuda.synchronize()
             next_token_ids = next_token_ids.detach().cpu().numpy()
             next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
 

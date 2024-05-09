@@ -201,7 +201,7 @@ def main(args: argparse.Namespace):
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
                      How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 128)
-    input_requests = [input_request for i in range(args.num_prompts)]
+    input_requests = [input_request for i in range(8)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
