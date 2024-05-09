@@ -92,33 +92,26 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        with torch.profiler.record_function("rotary_emb_fwd q"):
-            rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
+        # with torch.profiler.record_function("rotary_emb_fwd q"):
+            # rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
         torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
                     out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
-        # cache_k = torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
-        # cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
-        with torch.profiler.record_function("rotary_emb_fwd k"):
-            rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
+      
+        # with torch.profiler.record_function("rotary_emb_fwd k"):
+        #     rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
         torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
                     out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
       
-        # import deeplink_ext.cpp_extensions as ext
-        # pos_shape = infer_state.position_cos.shape
-        # with torch.profiler.record_function("rotary fuse qk"):
-        #     ext.rotary_embedding_v2(
-        #         q.view(-1, self.tp_q_head_num_, self.head_dim_),
-        #         cache_k,
-        #         infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
-        #         infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
-        #     )
-
-        # cache_v = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
-        # cache_v = cache_v.view(-1, self.tp_k_head_num_, self.head_dim_)
-       
-        # if self.layer_num_ <= 1 and int(infer_state.b_seq_len[0]) >= 129 and int(infer_state.b_seq_len[0]) <= 129:
-        #         print(f"seqlen:{int(infer_state.b_seq_len[0])}, cache_k:{cache_k.view(-1)}, input:{input.view(-1)}")
-        #         print(f"q:{q.view(-1)}")
+        import deeplink_ext.cpp_extensions as ext
+        pos_shape = infer_state.position_cos.shape
+        with torch.profiler.record_function("rotary fuse qk"):
+            ext.rotary_embedding_v2(
+                q.view(-1, self.tp_q_head_num_, self.head_dim_),
+                cache_k,
+                infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+                infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+            )
+      
         return q, cache_k, cache_v
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
