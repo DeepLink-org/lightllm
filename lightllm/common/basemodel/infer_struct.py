@@ -1,5 +1,6 @@
 import torch
 from lightllm.common.mem_manager import MemoryManager
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.common.req_manager import ReqManager
 
 class InferStateInfo:
@@ -13,11 +14,12 @@ class InferStateInfo:
         self.b_req_idx = None
         self.b_start_loc = None
         self.b_seq_len = None
+        self.seq_len_list: list = None
         self.max_len_in_batch = None
         self.is_prefill = None
         
         self.mem_manager: MemoryManager = None
-        self.req_manager: ReqManager = None
+        self.req_manager: PagingRequestManager = None
         
         self.mem_is_contiguous = None
         self.mem_index = None

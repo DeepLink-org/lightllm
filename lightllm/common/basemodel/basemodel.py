@@ -8,11 +8,12 @@ from lightllm.common.basemodel.layer_weights.hf_load_utils import load_hf_weight
 from lightllm.common.basemodel.infer_struct import InferStateInfo
 from lightllm.common.basemodel.splitfuse_infer_struct import SplitFuseInferStateInfo
 from lightllm.common.mem_manager import MemoryManager
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.common.req_manager import ReqManager
 from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
-from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
+# from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
 
 torch.backends.cudnn.enabled = True
 
@@ -102,7 +103,7 @@ class TpPartBaseModel:
         return
     
     def _init_req_manager(self):
-        self.req_manager = ReqManager(self.max_req_num, 
+        self.req_manager = PagingRequestManager(self.max_req_num, 
                                       self.max_seq_length,
                                       self.mem_manager)
         return 
@@ -161,29 +162,18 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
 
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num)
-        if alloc_mem is not None:
-            infer_state.mem_is_contiguous = True
-            infer_state.mem_index = alloc_mem[0]
-            infer_state.mem_start = alloc_mem[1]
-            infer_state.mem_end = alloc_mem[2]
+        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
 
-        else:
-            infer_state.mem_is_contiguous = False
-            alloc_mem = self.mem_manager.alloc(infer_state.total_token_num)
-            infer_state.mem_index = alloc_mem
-            infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        
-        init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
-                            max_len_in_batch, infer_state.mem_index)
-
+        infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+    
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
@@ -197,27 +187,19 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
         
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(batch_size)
-        if alloc_mem is not None:
-            infer_state.mem_is_contiguous = True
-            infer_state.mem_index = alloc_mem[0]
-            infer_state.mem_start = alloc_mem[1]
-            infer_state.mem_end = alloc_mem[2]
-            copy_kv_index_to_req(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len, infer_state.mem_index)
-        else:
-            infer_state.mem_is_contiguous = False
-            alloc_mem = self.mem_manager.alloc(batch_size)
-            infer_state.mem_index = alloc_mem
-            infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            copy_kv_index_to_req(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len, infer_state.mem_index)
+        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
 
+        infer_state.mem_is_contiguous = False
+        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
@@ -294,7 +276,7 @@ class TpPartBaseModel:
         infer_state.create_inner_decode_infer_status()
         predict_logics = self._splitfuse_forward(input_ids, infer_state)
         return predict_logics
-    
+
     @final
     def _context_forward(self, input_ids, infer_state: InferStateInfo):
         cuda_input_ids = input_ids
@@ -321,5 +303,3 @@ class TpPartBaseModel:
             input_embs = self.layers_infer[i].splitfuse_forward(input_embs, infer_state, self.trans_layers_weight[i])
         predict_logics = self.post_infer.splitfuse_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
         return predict_logics
-
-    

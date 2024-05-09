@@ -19,6 +19,8 @@
 import asyncio
 import time
 import torch
+import torch_dipu
+import deeplink_ext.patch_lightllm
 import uvloop
 import sys
 

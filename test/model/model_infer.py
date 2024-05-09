@@ -2,6 +2,9 @@ import numpy as np
 from multiprocessing import Queue
 import multiprocessing
 
+from lightllm.common.paging.block import _div_up
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
+
 def test_model_inference(world_size, model_dir, model_class, batch_size, input_len, output_len, mode):
     ans_queue = Queue()
     workers = []
@@ -10,13 +13,13 @@ def test_model_inference(world_size, model_dir, model_class, batch_size, input_l
             "tp_rank": rank_id,
             "world_size": world_size,
             "weight_dir": model_dir,
-            "max_total_token_num":batch_size * (input_len + output_len),
+            "max_total_token_num": batch_size * _div_up(input_len + output_len, PagingRequestManager.BLOCK_SIZE) * PagingRequestManager.BLOCK_SIZE,
             "load_way": "HF",
             "mode": mode,
             "max_req_num": batch_size,
             "max_seq_length": (input_len + output_len)
         }
-        
+        # tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_len, ans_queue)
         proc = multiprocessing.Process(target=tppart_model_infer, args=(model_class, model_kvargs, batch_size, input_len, output_len, ans_queue))
         proc.start()
         workers.append(proc)
@@ -35,7 +38,6 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     import torch.distributed as dist
     rank_id = model_kvargs["tp_rank"]
     world_size = model_kvargs["world_size"]
-
     dist.init_process_group('nccl', init_method='tcp://127.0.0.1:28765', rank=rank_id, world_size=world_size)
     torch.cuda.set_device(rank_id)
 
@@ -106,7 +108,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
 
     total_token_num = batch_size * input_len
     logics = model_part.forward(batch_size, total_token_num, input_len, test_data,
-                                                 b_req_idx, b_start_loc, b_seq_len, is_prefill=True)
+                                                b_req_idx, b_start_loc, b_seq_len, is_prefill=True)
     prob_out = torch.softmax(logics, dim=-1)
     predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
     predict_ids = predict_ids.detach().cpu().numpy()

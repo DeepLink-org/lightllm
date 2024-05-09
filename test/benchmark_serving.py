@@ -165,7 +165,6 @@ async def send_request(
                     chunks.append(chunk)
             output = b"".join(chunks).decode("utf-8")
             output = json.loads(output)
-            
             if "error" not in output:
                 break
 
@@ -191,8 +190,14 @@ def main(args: argparse.Namespace):
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
-    tokenizer = get_tokenizer(args.tokenizer, "slow")
-    input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+    # tokenizer = get_tokenizer(args.tokenizer, "slow")
+    # input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+
+    input_request = ("What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?", 64, 128)
+    input_requests = [input_request for i in range(args.num_prompts)]
 
     benchmark_start_time = time.time()
     asyncio.run(benchmark(input_requests, args.request_rate))
@@ -220,10 +225,10 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Benchmark the online serving throughput.")
-    parser.add_argument("--dataset", type=str, required=True,
-                        help="Path to the dataset.")
-    parser.add_argument("--tokenizer", type=str, required=True,
-                        help="Name or path of the tokenizer.")
+    # parser.add_argument("--dataset", type=str, required=True,
+    #                     help="Path to the dataset.")
+    # parser.add_argument("--tokenizer", type=str, required=True,
+    #                     help="Name or path of the tokenizer.")
     parser.add_argument("--request-rate", type=float, default=float("inf"),
                         help="Number of requests per second. If this is inf, "
                              "then all the requests are sent at time 0. "

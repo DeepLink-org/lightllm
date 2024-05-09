@@ -26,8 +26,8 @@ from transformers.configuration_utils import PretrainedConfig
 from lightllm.utils.log_utils import init_logger
 
 logger = init_logger(__name__)
-from ..models.llava.model import LlavaTokenizer
-from ..models.qwen_vl.model import QWenVLTokenizer
+# from ..models.llava.model import LlavaTokenizer
+# from ..models.qwen_vl.model import QWenVLTokenizer
 
 
 # A fast LLaMA tokenizer with the pre-processed `tokenizer.json` file.
