@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 from torch.profiler import record_function
-import torch_dipu
+
 
 from contextlib import nullcontext
 
@@ -16,19 +16,23 @@ def paged_token_attention(q, k_cache, v_cache, out, b_seq_len, block_table, bloc
     raise Exception("should running paged_token_attention in ext")
 
 def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_lens, block_table: Tensor, block_size: int):
+    numKeyValueHeads = k_cache.shape[1]
+    assert k_cache.shape[1] == v_cache.shape[1]
     batch, head, dim = q.shape
     kv_cache_len = k_cache.shape[0]
     q = q.reshape(batch, head*dim).unsqueeze(1)
-    k_cache = k_cache.reshape(kv_cache_len, head*dim).unsqueeze(0)
-    v_cache = v_cache.reshape(kv_cache_len, head*dim).unsqueeze(0)
-    output = torch.empty_like(q)
-    ext.paged_attention(output, q, k_cache, v_cache,
+    k_cache = k_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+    v_cache = v_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+    # current_lens = b_seq_len.cpu().numpy().tolist()
+    out = torch.empty_like(q)
+    
+    ext.paged_attention(out, q, k_cache, v_cache,
                         None, None, 
-                        current_lens, block_table, head, head,
-                        1.0 / math.sqrt(dim), "BSH", block_size, 1, 
+                        current_lens, block_table, head, numKeyValueHeads,
+                        1.0 / math.sqrt(dim), "BSH", block_size, 0, 
                         None, None, None, None, None, None, None, None
                         )
-    return output.squeeze().reshape((batch, head, dim))
+    return out.squeeze().reshape((batch, head, dim))
 
 
 def torch_token_attention(q, k, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, other_kv_index):
@@ -134,7 +138,7 @@ def test_incre_flash_attn():
 
 def test_token_attention():
     # BND S=1
-    q = torch.randn(2, 32, 128, dtype=torch.float16).cuda()
+    q = torch.randn(1, 32, 128, dtype=torch.float16).cuda()
     # SND
     k = torch.randn(1026, 32, 128, dtype=torch.float16).cuda()
     v = torch.randn(1026, 32, 128, dtype=torch.float16).cuda()
@@ -143,21 +147,21 @@ def test_token_attention():
         req_to_token_indexs = torch.arange(1026, dtype=torch.int32).reshape(1, 1026).cuda()
         b_req_idx = torch.tensor([0], dtype=torch.int32).cuda()
         b_start_loc = torch.tensor([0], dtype=torch.int32).cuda()
-        b_seq_len = torch.tensor([1025], dtype=torch.int32).cuda()
+        b_seq_len = torch.tensor([150], dtype=torch.int32).cuda()
     elif q.shape[0] == 2:
         req_to_token_indexs = torch.zeros((2, 512), dtype=torch.int32).cuda()
-        req_to_token_indexs[0, 0:129] = torch.arange(0, 129, 1, dtype=torch.int32).cuda()
-        req_to_token_indexs[1, 0:129] = torch.arange(128, 257, 1, dtype=torch.int32).cuda()
+        req_to_token_indexs[0, 0:127] = torch.arange(0, 127, 1, dtype=torch.int32).cuda()
+        req_to_token_indexs[1, 0:127] = torch.arange(128, 255, 1, dtype=torch.int32).cuda()
         b_req_idx = torch.tensor([0, 1], dtype=torch.int32).cuda()
-        b_start_loc = torch.tensor([0, 129], dtype=torch.int32).cuda()
-        b_seq_len = torch.tensor([129, 129], dtype=torch.int32).cuda()
-    max_len_in_batch = 129
+        b_start_loc = torch.tensor([0, 128], dtype=torch.int32).cuda()
+        b_seq_len = torch.tensor([127, 127], dtype=torch.int32).cuda()
+    max_len_in_batch = 150
     other_kv_index = 0
     o_torch = torch.empty_like(q)
 
-    torch_token_attention(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
+    ext.token_decode_attention_inference_batch_one(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
                           b_start_loc, b_seq_len, max_len_in_batch, other_kv_index)
-    print(o_torch)
+    # print(o_torch)
 
     # o_ext = torch.empty_like(q)
     # ext_token_attention(q, k, v, o_ext, req_to_token_indexs[b_req_idx],
@@ -166,19 +170,21 @@ def test_token_attention():
     # assert torch.allclose(o_torch.cpu(), o_ext.cpu(), rtol=1e-2, atol=1e-2)
 
     # max_len_in_batch = 1025
-    current_lens, blk_size = [max_len_in_batch,max_len_in_batch], 128
+    current_lens, blk_size = [max_len_in_batch], 128
     block_table = torch.tensor([
     # [i for i in range(max_seq_length // block_size)]
     [0,1],
-    [1,2],
+    # [1],
     # [3,5,7,],
     # [1,2,8,]
     ], dtype=torch.int32, device="cuda")
     o_ext = ext_paged_attention(q, k, v,current_lens ,block_table,blk_size )
-    print(o_ext)
+    # print(o_ext)
     print(torch.allclose(o_torch.cpu(), o_ext.cpu(), rtol=1e-2, atol=1e-2))
 
 if __name__ == "__main__":
+    import torch_dipu
     import deeplink_ext.cpp_extensions as ext
     # test_incre_flash_attn()
-    test_token_attention()
+    for i in range(20):
+        test_token_attention()

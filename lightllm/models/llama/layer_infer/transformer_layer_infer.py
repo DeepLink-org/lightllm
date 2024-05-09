@@ -92,8 +92,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        cache_k = torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
-        cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
+        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
+                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+      
+        torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
+                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
+      
         pos_shape = infer_state.position_cos.shape
         ext.rotary_embedding_v2(
             q.view(-1, self.tp_q_head_num_, self.head_dim_),
@@ -101,20 +105,18 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
             infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
             infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
         )
-
-        cache_v = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
-        cache_v = cache_v.view(-1, self.tp_k_head_num_, self.head_dim_)
+      
         return q, cache_k, cache_v
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
         o_tensor = torch.empty_like(q) if out is None else out
         context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
-                              k.view(-1, self.tp_k_head_num_, self.head_dim_),
-                              v.view(-1, self.tp_v_head_num_, self.head_dim_),
-                              o_tensor.view(-1, self.tp_q_head_num_, self.head_dim_),
-                              infer_state.b_start_loc,
-                              infer_state.b_seq_len,
-                              infer_state.max_len_in_batch)
+                            k.view(-1, self.tp_k_head_num_, self.head_dim_),
+                            v.view(-1, self.tp_v_head_num_, self.head_dim_),
+                            o_tensor.view(-1, self.tp_q_head_num_, self.head_dim_),
+                            infer_state.b_start_loc,
+                            infer_state.seq_len_list,
+                            infer_state.max_len_in_batch)
         return o_tensor
     
     def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
@@ -226,16 +228,16 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        o_tensor = torch.empty_like(q) if out is None else out
+        o_pa = torch.empty_like(q) if out is None else out
         paged_token_attention(q.view(calcu_shape1),
                                 infer_state.mem_manager.key_buffer[self.layer_num_],
                                 infer_state.mem_manager.value_buffer[self.layer_num_],
-                                o_tensor.view(calcu_shape1),
-                                infer_state.b_seq_len,
+                                o_pa.view(calcu_shape1),
+                                infer_state.seq_len_list,
                                 infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
-        return o_tensor
-   
+        return o_pa
+
     def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)

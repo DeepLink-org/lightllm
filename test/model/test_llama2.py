@@ -13,10 +13,10 @@ class TestLlama2Infer(unittest.TestCase):
     def test_llama2_infer(self):
         from lightllm.models.llama.model import LlamaTpPartModel
         test_model_inference(world_size=1, 
-                             model_dir="/data2/zhaochaoxing/models/llama-2-7b-chat-hf", 
+                             model_dir="/data01/zhaochaoxing/tools/llama-2-7b-chat-hf", 
                              model_class=LlamaTpPartModel, 
                              batch_size=1, 
-                             input_len=256, 
+                             input_len=126, 
                              output_len=4,
                              mode=[])
         return

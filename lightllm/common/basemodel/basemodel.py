@@ -162,14 +162,18 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
 
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        self.req_manager.alloc_page(b_req_idx, b_seq_len)
+        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
 
+        infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+    
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
@@ -183,14 +187,19 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
         
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        self.req_manager.alloc_page(b_req_idx, b_seq_len)
+        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
 
+        infer_state.mem_is_contiguous = False
+        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
