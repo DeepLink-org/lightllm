@@ -165,7 +165,6 @@ async def send_request(
                     chunks.append(chunk)
             output = b"".join(chunks).decode("utf-8")
             output = json.loads(output)
-            print(output)
             if "error" not in output:
                 break
 
@@ -194,13 +193,8 @@ def main(args: argparse.Namespace):
     # tokenizer = get_tokenizer(args.tokenizer, "slow")
     # input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
 
-    input_request = ("How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? How are you? \
-                     How are you? How are you? How are you? How are you? How are you? How are you? How are ", 256, 128)
+    input_request = ("What daily habits might improve mental health considering factors like sleep quality, social interaction, and exercise impact according to psychology studies done recently?   What daily habits might improve mental health considering factors like sleep quality, social interaction, and exercise impact according to psychology studies done recently? Do you knonw?", 256, 128)
+
     input_requests = [input_request for i in range(args.num_prompts)]
 
     benchmark_start_time = time.time()

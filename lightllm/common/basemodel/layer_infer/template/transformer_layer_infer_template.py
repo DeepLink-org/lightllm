@@ -44,10 +44,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     def _post_cache_kv(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
         infer_state.req_manager.fill_kv_cache(infer_state.b_req_idx, infer_state.b_start_loc,
                                               infer_state.b_seq_len, self.layer_num_, cache_k, cache_v)
-        # mem_manager = infer_state.mem_manager
-        # if not infer_state.mem_is_contiguous:
-        #     self._copy_kv_to_mem_cache(cache_k, cache_v, infer_state.mem_index, mem_manager)
-        #     return
     
     def _copy_kv_to_mem_cache(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
@@ -101,7 +97,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
         q, cache_k, cache_v = self._get_qkv(input1, cache_k, cache_v, infer_state, layer_weight)
         input1 = None
-        # import pdb; pdb.set_trace()
         self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
         o = self._token_attention_kernel(q, infer_state, layer_weight)
         q = None

@@ -22,6 +22,7 @@ from lightllm.models.llama.splitfuse_infer_struct import SplitFuseInferStateInfo
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv#, destindex_copy_quantize_kv
 from lightllm.common.basemodel import TransformerLayerInferTpl
 # from lightllm.models.llama.triton_kernel.splitfuse_context_flashattention_nopad import splitfuse_context_attention_fwd, splitfuse_context_attention_fwd_int8kv
+import deeplink_ext.cpp_extensions as ext
 
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
@@ -84,33 +85,22 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return
 
     def _att_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        with torch.profiler.record_function("rmsnorm_forward"):
-            return rmsnorm_forward(input, weight=layer_weight.att_norm_weight_, eps=self.eps_)
+        return rmsnorm_forward(input, weight=layer_weight.att_norm_weight_, eps=self.eps_)
     
     def _ffn_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         return rmsnorm_forward(input, weight=layer_weight.ffn_norm_weight_, eps=self.eps_)
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        # with torch.profiler.record_function("rotary_emb_fwd q"):
-            # rotary_emb_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.position_cos, infer_state.position_sin)
-        # torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    # out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
         cache_k = torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_)
         cache_k = cache_k.view(-1, self.tp_k_head_num_, self.head_dim_)
-        # with torch.profiler.record_function("rotary_emb_fwd k"):
-            # rotary_emb_fwd(cache_k, infer_state.position_cos, infer_state.position_sin)
-        # torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
-        #             out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
-        import deeplink_ext.cpp_extensions as ext
         pos_shape = infer_state.position_cos.shape
-        with torch.profiler.record_function("rotary fuse qk"):
-            ext.rotary_embedding_v2(
-                q.view(-1, self.tp_q_head_num_, self.head_dim_),
-                cache_k,
-                infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
-                infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
-            )
+        ext.rotary_embedding_v2(
+            q.view(-1, self.tp_q_head_num_, self.head_dim_),
+            cache_k,
+            infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+            infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+        )
 
         cache_v = torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_)
         cache_v = cache_v.view(-1, self.tp_k_head_num_, self.head_dim_)
@@ -245,29 +235,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                 infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
         return o_tensor
-       
-        # token_decode_attention_fwd(q.view(calcu_shape1),
-        #                            infer_state.mem_manager.key_buffer[self.layer_num_],
-        #                            infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                            o_tensor.view(calcu_shape1),
-        #                            infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
-        #                            infer_state.b_start_loc,
-        #                            infer_state.b_seq_len,
-        #                            infer_state.max_len_in_batch,
-        #                            infer_state.other_kv_index)
-        # return o_tensor
-
-        # o_tensor = token_softmax_reducev_fwd(att_m_tensor, 
-        #                             infer_state.mem_manager.value_buffer[self.layer_num_],
-        #                             o_tensor1.view(calcu_shape1),
-        #                             infer_state.req_manager.req_to_token_indexs,
-        #                             infer_state.b_req_idx,
-        #                             infer_state.b_start_loc,
-        #                             infer_state.b_seq_len,
-        #                             infer_state.max_len_in_batch,
-        #                             infer_state.other_kv_index)
-        # return o_tensor
-    
+   
     def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
