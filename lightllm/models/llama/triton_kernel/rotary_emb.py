@@ -15,3 +15,7 @@ compiled_torch_rotary_emb = torch_rotary_emb
 
 
 rotary_emb_fwd = compiled_torch_rotary_emb
+
+def rotary_emb_v2_fwd(q, cache_k, cos, sin):
+    print("should run rotary_embedding_v2 in ext")
+    return None

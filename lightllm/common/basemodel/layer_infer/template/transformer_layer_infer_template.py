@@ -43,7 +43,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     
     def _post_cache_kv(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
         infer_state.req_manager.fill_kv_cache(infer_state.b_req_idx, infer_state.b_start_loc,
-                                              infer_state.seq_len_list, self.layer_num_, cache_k, cache_v)
+                                              infer_state.b_seq_len_cpu_long, self.layer_num_, cache_k, cache_v)
     
     def _copy_kv_to_mem_cache(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
@@ -93,9 +93,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
 
     # this impl dont to use @mark_cost_time
     def _token_attention(self, input_embding, infer_state: InferStateInfo, layer_weight):
-        # if self.layer_num_ <= 1 and int(infer_state.b_seq_len[0]) >= 129 and int(infer_state.b_seq_len[0]) <= 129:
-        #     print(f"layer:{self.layer_num_} seqlen:{int(infer_state.b_seq_len[0])}, input_embding:{input_embding.view(-1)}")
-
         input1 = self._att_norm(input_embding, infer_state, layer_weight)
         cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
         q, cache_k, cache_v = self._get_qkv(input1, cache_k, cache_v, infer_state, layer_weight)
@@ -107,9 +104,6 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         if self.world_size_ > 1:
             dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o.view(-1, self.embed_dim_))
-
-        # if self.layer_num_ <= 1 and int(infer_state.b_seq_len[0]) >= 129 and int(infer_state.b_seq_len[0]) <= 129:
-        #     print(f"layer:{self.layer_num_} seqlen:{int(infer_state.b_seq_len[0])}, o:{o.view(-1)}")
         return
 
     # this impl dont to use @mark_cost_time

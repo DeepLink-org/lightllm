@@ -9,12 +9,11 @@ from functools import partial
 from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.models.llama.layer_weights.transformer_layer_weight import LlamaTransformerLayerWeight
 from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd
-from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd#, token_att_fwd_int8k
-from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import token_att_fwd, token_decode_attention_fwd, paged_token_attention
+from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import paged_token_attention, matmul_all_reduce
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_reduceV import token_att_fwd2, token_att_fwd2_int8v
 from lightllm.models.llama.triton_kernel.rmsnorm import rmsnorm_forward
-from lightllm.models.llama.triton_kernel.rotary_emb import rotary_emb_fwd
+from lightllm.models.llama.triton_kernel.rotary_emb import rotary_emb_fwd, rotary_emb_v2_fwd
 from lightllm.models.llama.triton_kernel.token_attention_softmax_and_reducev import token_softmax_reducev_fwd
 
 from lightllm.models.llama.infer_struct import LlamaInferStateInfo
@@ -22,7 +21,6 @@ from lightllm.models.llama.splitfuse_infer_struct import SplitFuseInferStateInfo
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv#, destindex_copy_quantize_kv
 from lightllm.common.basemodel import TransformerLayerInferTpl
 # from lightllm.models.llama.triton_kernel.splitfuse_context_flashattention_nopad import splitfuse_context_attention_fwd, splitfuse_context_attention_fwd_int8kv
-import deeplink_ext.cpp_extensions as ext
 
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
@@ -38,6 +36,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.head_dim_ = network_config["hidden_size"] // network_config["num_attention_heads"]
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
+        # from torch.distributed.distributed_c10d import _get_default_group, _get_pg_default_device
+        # assert dist.is_initialized()
+        # default_pg = _get_default_group()
+        # default_pg_device = _get_pg_default_device(default_pg)
+        # dicl_pg = default_pg._get_backend(default_pg_device)
+        # self.pg_comm_name = dicl_pg.get_comm_name(dist.get_rank())
         return
     
     def _bind_func(self):
@@ -99,7 +103,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                     out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
       
         pos_shape = infer_state.position_cos.shape
-        ext.rotary_embedding_v2(
+        rotary_emb_v2_fwd(
             q.view(-1, self.tp_q_head_num_, self.head_dim_),
             cache_k,
             infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
@@ -115,7 +119,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                             v.view(-1, self.tp_v_head_num_, self.head_dim_),
                             o_tensor.view(-1, self.tp_q_head_num_, self.head_dim_),
                             infer_state.b_start_loc,
-                            infer_state.seq_len_list,
+                            infer_state.b_seq_len_cpu_long,
                             infer_state.max_len_in_batch)
         return o_tensor
     
@@ -182,6 +186,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def _get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+        # o_tensor = torch.empty((input.shape[0], layer_weight.o_weight_.shape[1]), dtype=input.dtype, device=input.device)
+        # matmul_all_reduce(o_tensor, input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_, None, self.pg_comm_name)
         return o_tensor
 
     def _ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
@@ -192,6 +198,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         ffn1_out = gate_out * up_out
         gate_out, up_out = None, None
         ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
+        # ffn2_out = torch.empty((ffn1_out.shape[0], layer_weight.down_proj.shape[1]), dtype=ffn1_out.dtype, device=ffn1_out.device)
+        # matmul_all_reduce(ffn2_out, ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
         ffn1_out = None
         return ffn2_out
     
@@ -228,15 +236,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        o_pa = torch.empty_like(q) if out is None else out
+        o_tensor = torch.empty_like(q) if out is None else out
         paged_token_attention(q.view(calcu_shape1),
                                 infer_state.mem_manager.key_buffer[self.layer_num_],
                                 infer_state.mem_manager.value_buffer[self.layer_num_],
-                                o_pa.view(calcu_shape1),
-                                infer_state.seq_len_list,
+                                o_tensor.view(calcu_shape1),
+                                infer_state.b_seq_len_cpu_long,
                                 infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
-        return o_pa
+        return o_tensor
 
     def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         batch_size = infer_state.batch_size

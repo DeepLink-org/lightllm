@@ -111,9 +111,9 @@ class ReqQueue:
             req_first_router_need_tokens = req.get_first_router_need_tokens()
             if self._can_add_new_req(req, is_busy) and cur_batch_decode_need_tokens + new_batch_first_router_need_tokens + req_first_router_need_tokens <= self.batch_max_tokens:
                 can_run_list.append(req)
-                # if len(can_run_list) == 8:
-                #     print("batch =8!", flush=True)
-                #     break
+                if len(can_run_list) == 8:
+                    print("batch = 8!", flush=True)
+                    break
 
                 new_batch_first_router_need_tokens += req_first_router_need_tokens
                 if req.req_status in [ReqRunStatus.PAUSED_AND_KVKEEP, ReqRunStatus.PAUSED_AND_OFFLOAD]:
@@ -121,9 +121,9 @@ class ReqQueue:
             else:
                 break
         
-        # if len(can_run_list) != 0 and len(can_run_list) != 8:
-        #     print(f"batch = {len(can_run_list)}", flush=True)
-        #     return None
+        if len(can_run_list) != 0 and len(can_run_list) != 8:
+            print(f"batch = {len(can_run_list)}, ignore", flush=True)
+            return None
 
         if len(can_run_list) != 0:
             new_batch = Batch(uuid.uuid4().hex, can_run_list)

@@ -146,6 +146,7 @@ class TpPartBaseModel:
             multimodal_params=None,
             is_prefill=True):
         if is_prefill:
+            print(f"batch_size:{batch_size}")
             return self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
         else:
             return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
@@ -162,14 +163,14 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
-        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
+        infer_state.b_seq_len_cpu_long = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
 
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
+        self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
 
         infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
@@ -187,14 +188,14 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
-        infer_state.seq_len_list = b_seq_len.cpu().numpy().tolist()
+        infer_state.b_seq_len_cpu_long = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
         
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        self.req_manager.alloc_page(b_req_idx, infer_state.seq_len_list)
+        self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
 
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")

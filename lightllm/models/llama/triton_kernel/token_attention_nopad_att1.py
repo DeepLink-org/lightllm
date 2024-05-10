@@ -6,7 +6,7 @@ from torch.profiler import record_function
 
 from contextlib import nullcontext
 
-token_att_fwd = _token_attention
+# token_att_fwd = _token_attention
 
 def token_decode_attention_fwd(q, k, v, out, req_to_tokens, b_req_idx, b_start_loc, b_seq_len, max_len_in_batch, other_kv_index):
     print("running token_decode_attention_fwd")
@@ -14,6 +14,10 @@ def token_decode_attention_fwd(q, k, v, out, req_to_tokens, b_req_idx, b_start_l
 
 def paged_token_attention(q, k_cache, v_cache, out, b_seq_len, block_table, block_size):
     raise Exception("should running paged_token_attention in ext")
+
+def matmul_all_reduce(out, x1, x2, bias, group):
+    print("running matmul_all_reduce")
+    return
 
 def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_lens, block_table: Tensor, block_size: int):
     numKeyValueHeads = k_cache.shape[1]
