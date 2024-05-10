@@ -3,6 +3,7 @@ import os
 import json
 import time
 import torch
+import torch.distributed as dist
 from typing import final
 from torch.profiler import record_function
 
@@ -196,7 +197,10 @@ class TpPartBaseModel:
                             max_len_in_batch, infer_state.mem_index, self.max_seq_length)
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
-        predict_logics = self.opt_context_forward(input_ids, infer_state)
+        default_pg = None
+        if self.world_size_ > 1:
+            default_pg = dist.distributed_c10d._get_default_group()
+        predict_logics = self.opt_context_forward(input_ids, infer_state, default_pg)
 
         return predict_logics
     
@@ -226,8 +230,10 @@ class TpPartBaseModel:
         infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
-
-        predict_logics = self.opt_token_forward(input_ids, infer_state)
+        default_pg = None
+        if self.world_size_ > 1:
+            default_pg = dist.distributed_c10d._get_default_group()
+        predict_logics = self.opt_token_forward(input_ids, infer_state, default_pg)
 
         return predict_logics
     
@@ -306,33 +312,33 @@ class TpPartBaseModel:
 
     @record_function('_context_forward')
     @final
-    def _context_forward(self, input_ids, infer_state: InferStateInfo):
-        input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight)
-        # for i in range(self.layers_num):
-        for i in range(1):
-            input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i])
-        
-        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True)
+    def _context_forward(self, input_ids, infer_state: InferStateInfo, default_pg):
+        input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight, default_pg)
+        for i in range(self.layers_num):
+        # for i in range(2):
+            input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i], default_pg)
+
+        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True, default_pg=default_pg)
         
         return predict_logics
     
-    def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, current_len, max_seq_length, batch_size):
-        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight)
-        # for i in range(self.layers_num):
-        for i in range(1):
-            input_embs= self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length)
-        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True)
+    def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, current_len, max_seq_length, batch_size, default_pg):
+        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight, default_pg)
+        for i in range(self.layers_num):
+        # for i in range(1):
+            input_embs = self.layers_infer[i].opt_full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length, default_pg)
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True, default_pg=default_pg)
         
         return predict_logics
 
     @record_function('_token_forward')
     @final
-    def _token_forward(self, input_ids, infer_state: InferStateInfo):
+    def _token_forward(self, input_ids, infer_state: InferStateInfo, default_pg):
         with record_function('token_forward_with_pre_post_process'):
             batch_size = infer_state.batch_size
             cuda_input_ids = input_ids
             assert infer_state.batch_size == 1
-            predict_logics = self.all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, infer_state.int_index_list[0], self.max_seq_length, batch_size)
+            predict_logics = self.all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, infer_state.int_index_list[0], self.max_seq_length, batch_size, default_pg)
 
         return predict_logics
     

@@ -2,7 +2,12 @@ import math
 import torch
 from torch.profiler import record_function
 
-arange_tensor = torch.arange(0, 2048).cuda()
+from functools import lru_cache
+
+@lru_cache(None)
+def get_arange_tensor():
+    arange_tensor = torch.arange(0, 2048).cuda()
+    return arange_tensor
 
 def step0(Req_to_tokens, B_req_idx):
     b_loc = Req_to_tokens[B_req_idx]
@@ -34,7 +39,7 @@ def _token_attention(q, k, out, Req_to_tokens, B_req_idx, b_start_loc, b_seq_len
     batch, head, dim = b_loc.shape[0], q.shape[1], q.shape[2]
     xq = q.view(batch, 1, head, dim).transpose(1, 2)
     for i in range(batch):
-        current_arange = arange_tensor[:b_seq_len[i]]
+        current_arange = get_arange_tensor()[:b_seq_len[i]]
         with record_function('opt_step1'):
             k_loc_index = opt_step1(b_seq_len[i], max_input_len, current_arange)
         k_loc = b_loc[i][k_loc_index]
