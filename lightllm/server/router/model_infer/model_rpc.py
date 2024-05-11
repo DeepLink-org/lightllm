@@ -37,7 +37,7 @@ from .infer_batch import requests_mapping
 from .infer_batch import InferReq
 from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.log_utils import init_logger
-from torch.profiler import record_function
+
 
 class ModelRpcServer(rpyc.Service):
 
@@ -66,8 +66,6 @@ class ModelRpcServer(rpyc.Service):
 
         dist.init_process_group('nccl', init_method=f'tcp://127.0.0.1:{kvargs["nccl_port"]}', rank=self.tp_rank, world_size=world_size)
         torch.cuda.set_device(self.tp_rank)
-        a = torch.randn(20).cuda()
-        print(f"{'=' * 30}: {a}", flush=True)
 
         model_cfg, _ = PretrainedConfig.get_config_dict(
             weight_dir
@@ -231,24 +229,21 @@ class ModelRpcServer(rpyc.Service):
             kwargs, run_reqs, not_run_reqs = prepare_decode_inputs(batch)
         
         if len(run_reqs) >= 1:
-            with record_function("calc logits forward"):
-                logits = self.model.forward(**kwargs)
-            with record_function("sample"):
-                next_token_ids, next_token_probs = sample(logits, run_reqs)
-            with record_function("after sample"): 
-                next_token_ids = next_token_ids.detach().cpu().numpy()
-                next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
+            logits = self.model.forward(**kwargs)
+            next_token_ids, next_token_probs = sample(logits, run_reqs)
+            next_token_ids = next_token_ids.detach().cpu().numpy()
+            next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
 
-                for req_obj, next_token_id, next_token_logprob in zip(run_reqs, next_token_ids, next_token_logprobs):
-                    # prefill and decode is same
-                    req_obj.cur_kv_len = len(req_obj.input_token_ids)
-                    req_obj.input_token_ids.append(next_token_id)
-                    req_obj.out_token_id_count[next_token_id] += 1
-                    metadata = {
-                        'id': int(next_token_id),
-                        'logprob': float(next_token_logprob),
-                    }
-                    output_dict[req_obj.r_id] = (req_obj.req_status, req_obj.cur_kv_len, int(next_token_id), metadata) # 状态， cur_kv_len, token_id, metadata
+            for req_obj, next_token_id, next_token_logprob in zip(run_reqs, next_token_ids, next_token_logprobs):
+                # prefill and decode is same
+                req_obj.cur_kv_len = len(req_obj.input_token_ids)
+                req_obj.input_token_ids.append(next_token_id)
+                req_obj.out_token_id_count[next_token_id] += 1
+                metadata = {
+                    'id': int(next_token_id),
+                    'logprob': float(next_token_logprob),
+                }
+                output_dict[req_obj.r_id] = (req_obj.req_status, req_obj.cur_kv_len, int(next_token_id), metadata) # 状态， cur_kv_len, token_id, metadata
 
         for req_obj in not_run_reqs:
             output_dict[req_obj.r_id] = (req_obj.req_status, req_obj.cur_kv_len, None, None) # 状态， cur_kv_len, token_id, metadata

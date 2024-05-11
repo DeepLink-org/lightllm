@@ -216,18 +216,30 @@ def token_decode_attention_fwd(q, k, v, out, req_to_tokens, b_req_idx, b_start_l
     print("running token_decode_attention_fwd")
     return
 
-
-
+def dump_tensor(x, name):
+    import pickle
+    with open(f'/data02/zhoushenglong/tmp/{name}.pkl', 'wb') as f:
+        if isinstance(x, torch.Tensor):
+            pickle.dump(x.cpu(), f)
+        else:
+            pickle.dump(x, f)
 
 def torch_token_attention(q, k, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, other_kv_index):
     # q: BSH
+    print("************* debug info ***************************", flush=True)
+    print("b_loc", b_loc, flush=True)
+    print(max_input_len, b_seq_len, torch.arange(0, b_seq_len[0], device="cuda:0", dtype=torch.int32), flush=True)
+    # dump_tensor(key, "key_test1")
+    print("************* debug info ***************************", flush=True)
     batch, head, dim = b_loc.shape[0], q.shape[1], q.shape[2]
     q_device = q.device
     xq = q.view(batch, 1, head, dim).transpose(1, 2)
     for i in range(batch):
         # token_attention
         k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=q_device, dtype=torch.int32)]
+        
         key = k[k_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
+        
         # out_loc = b_start_loc[i] + torch.arange(0, b_seq_len[i], device=q_device)
         # out[:, out_loc] = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
         logics = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])

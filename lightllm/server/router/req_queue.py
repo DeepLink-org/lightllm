@@ -118,6 +118,12 @@ class ReqQueue:
                 break
             # break
 
+        if (len(can_run_list) != 0):
+            # if (len(can_run_list) != 8):
+            #     print("test batch: ", len(can_run_list), flush=True)
+            #     raise ValueError("test")
+            print("test batch: ", len(can_run_list))
+
         if len(can_run_list) != 0:
             new_batch = Batch(uuid.uuid4().hex, can_run_list)
             self.waiting_req_list = self.waiting_req_list[len(can_run_list) + aborted_count:]

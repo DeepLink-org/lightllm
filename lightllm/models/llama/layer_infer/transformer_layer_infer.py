@@ -221,6 +221,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                     mem_manager.value_scale_buffer[self.layer_num_])
         return
     
+
+    def dump_tensor(self, x, name):
+        import pickle
+        with open(f'/data02/zhoushenglong/tmp/{name}.pkl', 'wb') as f:
+            if isinstance(x, torch.Tensor):
+                pickle.dump(x.cpu(), f)
+            else:
+                pickle.dump(x, f)
+
     @record_function("token_decode_attention_normal")
     def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         total_token_num = infer_state.total_token_num
@@ -270,8 +279,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                    infer_state.mem_manager.key_buffer[self.layer_num_],
                                    infer_state.mem_manager.value_buffer[self.layer_num_],
                                    o_tensor.view(calcu_shape1),
-                                #    infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
-                                   infer_state.req_manager.req_to_token_indexs,
+                                   infer_state.req_manager.req_to_token_indexs[infer_state.b_req_idx],
                                    infer_state.b_start_loc,
                                    infer_state.b_seq_len,
                                    infer_state.max_len_in_batch,

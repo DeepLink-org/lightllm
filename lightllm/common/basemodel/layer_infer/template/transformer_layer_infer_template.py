@@ -33,8 +33,15 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     @record_function("_pre_cache_kv")
     def _pre_cache_kv(self, infer_state:InferStateInfo, layer_weight)->Tuple[torch.Tensor, torch.Tensor]:
         if infer_state.mem_is_contiguous:
-            cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
-            cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
+            if infer_state.batch_size > 1:
+                index = []
+                for i in range(infer_state.batch_size):
+                    index += list(range(infer_state.req_manager.req_to_token_indexs[i][0], infer_state.req_manager.req_to_token_indexs[i][0] + infer_state.b_seq_len[i]))
+                cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][index, :, :]
+                cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][index, :, :]
+            else:
+                cache_k = infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
+                cache_v = infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end, :, :]
         else:
             cache_k = infer_state.key_buffer
             cache_v = infer_state.value_buffer
@@ -48,7 +55,16 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         mem_manager = infer_state.mem_manager
         if not infer_state.mem_is_contiguous:
             self._copy_kv_to_mem_cache(cache_k, cache_v, infer_state.mem_index, mem_manager)
-            return
+        else:
+            start_index = 0
+            tmp = infer_state.req_manager.req_to_token_indexs[:infer_state.batch_size][:, 0].reshape(-1)
+            for i in range(infer_state.batch_size):
+                end_index = start_index + infer_state.b_seq_len[i].item()
+                # self._copy_kv_to_mem_cache(cache_k[start_index:end_index], cache_v[start_index:end_index], infer_state.mem_index[start_index:end_index], mem_manager)
+                infer_state.mem_manager.key_buffer[self.layer_num_][tmp[i]:tmp[i] + infer_state.b_seq_len[i]] = cache_k[start_index:end_index]
+                infer_state.mem_manager.value_buffer[self.layer_num_][tmp[i]:tmp[i] + infer_state.b_seq_len[i]] = cache_v[start_index:end_index]
+                start_index = end_index
+        return
     
     def _copy_kv_to_mem_cache(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])

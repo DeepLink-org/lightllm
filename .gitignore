@@ -4,3 +4,6 @@ build
 dist
 *.egg-info
 .idea
+kernel_meta*
+.vscode
+log
