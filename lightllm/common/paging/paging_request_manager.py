@@ -63,7 +63,7 @@ class PagingRequestManager(ReqManager):
         assert k.shape[0] == v.shape[0]
         batch = b_start_loc.shape[0]
         if batch == k.shape[0]:
-            self.fill_kv_cache_decode(req_idx, b_seq_len, layer_num, k, v, block_indices)
+            self.fill_kv_cache_decode(req_idx, b_seq_len, layer_num, k, v, block_indices, kv_start_indices)
         else:
             self.fill_kv_cache_prefill(req_idx, b_start_loc, b_seq_len, layer_num, k, v)
 
