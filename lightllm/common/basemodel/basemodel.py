@@ -159,7 +159,6 @@ class TpPartBaseModel:
         infer_state.batch_size = batch_size
         infer_state.total_token_num = total_token_num
         infer_state.max_len_in_batch = max_len_in_batch
-        assert (input_ids.shape[0] == total_token_num)
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
@@ -172,10 +171,14 @@ class TpPartBaseModel:
 
         self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
 
-        infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.key_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
     
         infer_state.init_some_extra_state(self, input_ids)
+        for b_idx in range(batch_size):
+            block_table = self.req_manager.get_block_table(int(b_req_idx[b_idx]))
+            infer_state.block_table_cpu.append(block_table.tolist())
+
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
     
@@ -202,6 +205,14 @@ class TpPartBaseModel:
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
+        infer_state.block_table = self.req_manager.get_batched_block_table(b_req_idx)
+        infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')
+        for b_idx in range(batch_size):
+            req = self.req_manager.req_map[int(b_req_idx[b_idx])]
+            block_table = self.req_manager.block_manager.get_block_table(req)
+            block_idx = block_table[req.num_blocks() - 1]
+            infer_state.block_indices[b_idx] = block_idx
+
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
     

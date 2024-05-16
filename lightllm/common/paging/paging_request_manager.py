@@ -1,6 +1,7 @@
 import numpy
 import torch
 from torch import Tensor
+from lightllm.common.basemodel.infer_struct import InferStateInfo
 from lightllm.common.mem_manager import MemoryManager
 from lightllm.common.paging.block import _div_up
 from lightllm.common.paging.block_manager.base_block_manager import BaseBlockManager
@@ -8,7 +9,7 @@ from lightllm.common.paging.block_manager.default_block_manager import DefaultBl
 from lightllm.common.paging.request import Request
 from lightllm.common.req_manager import ReqManager
 from lightllm.utils.log_utils import init_logger
-
+from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 
 
 logger = init_logger(__name__)
@@ -56,60 +57,45 @@ class PagingRequestManager(ReqManager):
                 padding_table.append(numpy.append(t, tmp))
             else:
                 padding_table.append(t)
-        # print(f"table:{table}, max_len:{max_len}, length:{length}")
         return torch.from_numpy(numpy.array(padding_table)).cuda().to(torch.int32)
         
 
-    def fill_kv_cache(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):
+    def fill_kv_cache(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
         assert k.shape[0] == v.shape[0]
-        batch = b_start_loc.shape[0]
+        batch = infer_state.b_start_loc.shape[0]
         if batch == k.shape[0]:
-            self.fill_kv_cache_decode(req_idx, b_seq_len, layer_num, k, v)
+            self.fill_kv_cache_decode(layer_num, k, v, infer_state)
         else:
-            self.fill_kv_cache_prefill(req_idx, b_start_loc, b_seq_len, layer_num, k, v)
+            self.fill_kv_cache_prefill(layer_num, k, v, infer_state)
 
-    def fill_kv_cache_decode(self, req_idx: Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):
-        assert k.shape[0] == len(b_seq_len)
-        batch = k.shape[0]
-        for b_idx in range(batch):
-            seq_len = b_seq_len[b_idx]
-            req = self.req_map[int(req_idx[b_idx])]
-            block_table = self.block_manager.get_block_table(req)
-            
-            block_idx = block_table[req.num_blocks() - 1]
-            last_block_offset = (seq_len - 1) % PagingRequestManager.BLOCK_SIZE
-            cache_start = block_idx * PagingRequestManager.BLOCK_SIZE + last_block_offset
-            self.mem_manager.key_buffer[layer_num][cache_start] = k[b_idx]
-            self.mem_manager.value_buffer[layer_num][cache_start] = v[b_idx]
-            # if layer_num == 2 and seq_len >= 125 and seq_len <= 130:
-            #     print(f"block_table:{self.get_batched_block_table(req_idx)}, block_idx:{block_idx}, last_block_offset:{last_block_offset}")
-            #     print(f"seqlen:{seq_len}, k:{k.view(-1)}")
+    def fill_kv_cache_decode(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
+        assert k.shape[0] == infer_state.b_seq_len.shape[0]
+        last_block_offsets = (infer_state.b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
+        cache_starts = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
+        destindex_copy_kv(k, cache_starts, self.mem_manager.key_buffer[layer_num])
+        destindex_copy_kv(v, cache_starts, self.mem_manager.value_buffer[layer_num])
         
 
-    def fill_kv_cache_prefill(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):
-        batch = b_start_loc.shape[0]
-        for b_idx in range(batch):
-            
-            seq_len = b_seq_len[b_idx]
-            start = b_start_loc[b_idx]
+    def fill_kv_cache_prefill(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
+        for b_idx in range(infer_state.batch_size):
+            seq_len = infer_state.b_seq_len_cpu_long[b_idx]
+            start = b_idx * infer_state.max_len_in_batch
             end = start + seq_len
             single_k = k[start:end]
             single_v = v[start:end]
-
-            block_table = self.get_block_table(int(req_idx[b_idx]))
             block_number = _div_up(seq_len, PagingRequestManager.BLOCK_SIZE)
             last_block_offset = seq_len - (block_number - 1) * PagingRequestManager.BLOCK_SIZE
             for num in range(block_number):
-                block_idx = block_table[num]
+                block_idx = infer_state.block_table_cpu[b_idx][num]
                 offset = last_block_offset if block_number - 1 == num else PagingRequestManager.BLOCK_SIZE
                 cache_start = block_idx * PagingRequestManager.BLOCK_SIZE
                 kv_start = num * PagingRequestManager.BLOCK_SIZE
                 block_k = single_k[kv_start:kv_start+offset]
                 block_v = single_v[kv_start:kv_start+offset]
-               
-                self.mem_manager.key_buffer[layer_num][cache_start:cache_start+offset] = block_k
-                self.mem_manager.value_buffer[layer_num][cache_start:cache_start+offset] = block_v
-    
+                idx = torch.arange(cache_start, cache_start+offset, 1, dtype=torch.int32, device='cuda')
+                destindex_copy_kv(block_k, idx, self.mem_manager.key_buffer[layer_num])
+                destindex_copy_kv(block_v, idx, self.mem_manager.value_buffer[layer_num])
+
 
     def alloc(self, need_size):
         if need_size > self.can_use_req_size:

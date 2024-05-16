@@ -242,7 +242,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                 infer_state.mem_manager.value_buffer[self.layer_num_],
                                 o_tensor.view(calcu_shape1),
                                 infer_state.b_seq_len_cpu_long,
-                                infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
+                                infer_state.block_table,
+                                # infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
         return o_tensor
 

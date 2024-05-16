@@ -1,6 +1,5 @@
 import torch
 from lightllm.common.mem_manager import MemoryManager
-from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.common.req_manager import ReqManager
 
 class InferStateInfo:
@@ -19,7 +18,7 @@ class InferStateInfo:
         self.is_prefill = None
         
         self.mem_manager: MemoryManager = None
-        self.req_manager: PagingRequestManager = None
+        self.req_manager = None
         
         self.mem_is_contiguous = None
         self.mem_index = None
@@ -31,6 +30,9 @@ class InferStateInfo:
         self.is_splitfuse = False
         self.return_all_prompt_logprobs = False
         self.multimodal_params = None
+        self.block_indices = None
+        self.block_table_cpu = []
+        self.block_table: torch.Tensor = None
     
 
     def init_some_extra_state(self, model, input_ids : torch.Tensor):
