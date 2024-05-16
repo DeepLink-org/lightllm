@@ -59,7 +59,7 @@ class PagingRequestManager(ReqManager):
         # print(f"table:{table}, max_len:{max_len}, length:{length}")
         return torch.from_numpy(numpy.array(padding_table)).cuda().to(torch.int32)
         
-    def fill_kv_cache(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor, block_indices):
+    def fill_kv_cache(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor, block_indices: Tensor, kv_start_indices: Tensor):
         assert k.shape[0] == v.shape[0]
         batch = b_start_loc.shape[0]
         if batch == k.shape[0]:
@@ -67,14 +67,11 @@ class PagingRequestManager(ReqManager):
         else:
             self.fill_kv_cache_prefill(req_idx, b_start_loc, b_seq_len, layer_num, k, v)
 
-    def fill_kv_cache_decode(self, req_idx: Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):
-        assert k.shape[0] == len(b_seq_len)
-        batch = k.shape[0]
-        seq_lens = b_seq_len
-        last_block_offsets = (seq_lens - 1) % PagingRequestManager.BLOCK_SIZE
-        cache_starts = block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
+    def fill_kv_cache_decode(self, req_idx: Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor, block_indices: Tensor, kv_start_indices: Tensor):
         from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
-        destindex_copy_kv(k, cache_starts, self.mem_manager.key_buffer[layer_num])
+        destindex_copy_kv(k, kv_start_indices, self.mem_manager.key_buffer[layer_num])
+        destindex_copy_kv(v, kv_start_indices, self.mem_manager.value_buffer[layer_num])
+
 
     def fill_kv_cache_prefill(self, req_idx: Tensor, b_start_loc:Tensor, b_seq_len:list, layer_num: int, k: Tensor, v: Tensor):
         batch = b_start_loc.shape[0]
