@@ -31,6 +31,7 @@ class InferStateInfo:
         self.is_splitfuse = False
         self.return_all_prompt_logprobs = False
         self.multimodal_params = None
+        self.block_indices = None
     
 
     def init_some_extra_state(self, model, input_ids : torch.Tensor):

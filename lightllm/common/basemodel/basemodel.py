@@ -202,6 +202,16 @@ class TpPartBaseModel:
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
+
+        infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')
+        for b_idx in range(batch_size):
+            seq_len = b_seq_len[b_idx]
+            req = self.req_manager.req_map[int(b_req_idx[b_idx])]
+            block_table = self.req_manager.block_manager.get_block_table(req)
+            block_idx = block_table[req.num_blocks() - 1]
+            infer_state.block_indices[b_idx] = block_idx
+        infer_state.block_indices[b_idx] = block_idx
+
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
     
