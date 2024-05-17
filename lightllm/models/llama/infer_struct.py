@@ -12,9 +12,8 @@ class LlamaInferStateInfo(InferStateInfo):
     
     def init_some_extra_state(self, model, input_ids : torch.Tensor):
         if self.is_prefill:
-            b_seq_len_numpy = self.b_seq_len.cpu().numpy()
-            position_ids = torch.from_numpy(np.concatenate([np.arange(0, b_seq_len_numpy[i])
-                                            for i in range(len(b_seq_len_numpy))], axis=0)).cuda()
+            position_ids = torch.from_numpy(np.concatenate([np.arange(0, self.max_len_in_batch)
+                                            for i in range(self.batch_size)], axis=0)).cuda()
             self.position_cos = torch.index_select(model._cos_cached, 0, position_ids).view(position_ids.shape[0], -1)
             self.position_sin = torch.index_select(model._sin_cached, 0, position_ids).view(position_ids.shape[0], -1)
             position_ids = None

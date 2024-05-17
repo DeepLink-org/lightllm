@@ -39,8 +39,8 @@ class LlamaPostLayerInfer(PostLayerInferTpl):
         if not infer_state.is_splitfuse and infer_state.is_prefill and not infer_state.return_all_prompt_logprobs:
             batch_size = infer_state.batch_size
             last_input = torch.empty((batch_size, self.embed_dim_), device=input_embdings.device, dtype=torch.float16)
-            last_index = torch.cumsum(infer_state.b_seq_len, dim=0, dtype=torch.long) - 1
-            last_input[:, :] = input_embdings[last_index, :]
+            last_index = infer_state.b_start_loc + infer_state.b_seq_len - 1
+            last_input[:, :] = input_embdings.view(-1, self.embed_dim_)[last_index, :]
             return last_input, batch_size
 
         if not infer_state.is_splitfuse and infer_state.is_prefill and infer_state.return_all_prompt_logprobs:

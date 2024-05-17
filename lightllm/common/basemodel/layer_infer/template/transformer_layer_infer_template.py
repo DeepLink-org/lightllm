@@ -42,8 +42,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         raise Exception("need to impl")
     
     def _post_cache_kv(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
-        infer_state.req_manager.fill_kv_cache(infer_state.b_req_idx, infer_state.b_start_loc,
-                                              infer_state.b_seq_len_cpu_long, self.layer_num_, cache_k, cache_v)
+        infer_state.req_manager.fill_kv_cache(self.layer_num_, cache_k, cache_v, infer_state)
     
     def _copy_kv_to_mem_cache(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])

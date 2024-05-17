@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import copy
 from .infer_batch import requests_mapping, InferReq, InferBatch
 from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.infer_utils import calculate_time
@@ -38,13 +39,22 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
         nopad_max_len_in_batch = max(nopad_max_len_in_batch, seq_len)
         start_loc += seq_len
     
-    if len(run_reqs) >= 1:
-        
-        input_ids = np.concatenate(input_ids, dtype=np.int64)
+    pad_input_ids = []
+    for input_id in input_ids:
+        nopad_len = len(input_id)
+        if nopad_len < nopad_max_len_in_batch:
+            pad_input_id = copy.deepcopy(input_id)
+            for _ in range(nopad_max_len_in_batch - nopad_len):
+                pad_input_id.append(0)
+            pad_input_ids.append(pad_input_id)
+        else:
+            pad_input_ids.append(input_id)
 
+    if len(run_reqs) >= 1:
+        input_ids = np.concatenate(pad_input_ids, dtype=np.int64)
         input_ids = torch.tensor(input_ids, dtype=torch.int64, device='cuda')
         nopad_b_req_idx = torch.tensor(nopad_b_req_idx, dtype=torch.int32, device='cuda')
-        nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
+        b_start_loc = torch.arange(0, len(batch) * nopad_max_len_in_batch, nopad_max_len_in_batch, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
         kwargs = {
             "batch_size": len(batch),
@@ -52,7 +62,7 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
             "max_len_in_batch": nopad_max_len_in_batch,
             "input_ids": input_ids,
             "b_req_idx": nopad_b_req_idx,
-            "b_start_loc": nopad_b_start_loc,
+            "b_start_loc": b_start_loc,
             "b_seq_len": nopad_b_seq_len,
             "is_prefill": True,
         }
@@ -90,6 +100,7 @@ def prepare_decode_inputs(batch:InferBatch):
     if len(run_reqs) >= 1:
 
         input_ids = torch.tensor(input_ids, dtype=torch.int64, device='cuda')
+        
         nopad_b_req_idx = torch.tensor(nopad_b_req_idx, dtype=torch.int32, device='cuda')
         nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
