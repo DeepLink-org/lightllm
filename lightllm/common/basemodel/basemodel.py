@@ -213,6 +213,9 @@ class TpPartBaseModel:
             block_idx = block_table[req.num_blocks() - 1]
             infer_state.block_indices[b_idx] = block_idx
 
+        last_block_offsets = (b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
+        infer_state.kv_start_indices = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
+
         predict_logics = self._token_forward(input_ids, infer_state)
         return predict_logics
     

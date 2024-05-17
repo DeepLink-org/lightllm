@@ -69,11 +69,11 @@ class PagingRequestManager(ReqManager):
             self.fill_kv_cache_prefill(layer_num, k, v, infer_state)
 
     def fill_kv_cache_decode(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
-        assert k.shape[0] == infer_state.b_seq_len.shape[0]
-        last_block_offsets = (infer_state.b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
-        cache_starts = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
-        destindex_copy_kv(k, cache_starts, self.mem_manager.key_buffer[layer_num])
-        destindex_copy_kv(v, cache_starts, self.mem_manager.value_buffer[layer_num])
+        # assert k.shape[0] == infer_state.b_seq_len.shape[0]
+        # last_block_offsets = (infer_state.b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
+        # cache_starts = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
+        destindex_copy_kv(k, infer_state.kv_start_indices, self.mem_manager.key_buffer[layer_num])
+        destindex_copy_kv(v, infer_state.kv_start_indices, self.mem_manager.value_buffer[layer_num])
         
 
     def fill_kv_cache_prefill(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
