@@ -134,7 +134,7 @@ async def get_request(
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
-
+import requests
 async def send_request(
     prompt: str,
     prompt_len: int,
@@ -143,7 +143,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate'
+    url = 'http://localhost:8000/generate_stream'
       
     data = {
         'inputs': prompt,
@@ -154,23 +154,28 @@ async def send_request(
              # 'temperature': 0.1,
         }
     }
-       
-
+    first_latency = -1
     timeout = aiohttp.ClientTimeout(total=3 * 3600)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        while True:
+        # while True:
             async with session.post(url, headers=headers, json=data) as response:
-                chunks = []
-                async for chunk, _ in response.content.iter_chunks():
-                    chunks.append(chunk)
-            output = b"".join(chunks).decode("utf-8")
-            output = json.loads(output)
-            if "error" not in output:
-                break
+                async for line in response.content:
+                    if line != None and line != b'\n':
+                        if first_latency == -1:
+                            # line = json.loads(line.decode("utf-8")[5:])
+                            first_latency = time.time() - request_start_time
+                        # print(line)
+            #     chunks = []
+            #     async for chunk, _ in response.content.iter_chunks():
+            #         chunks.append(chunk)
+            # output = b"".join(chunks).decode("utf-8")
+            # # output = json.loads(output)
+            # if "error" not in output:
+            #     break
 
     request_end_time = time.time()
     request_latency = request_end_time - request_start_time
-    REQUEST_LATENCY.append((prompt_len, output_len, request_latency))
+    REQUEST_LATENCY.append((prompt_len, output_len, request_latency, first_latency))
 
 
 async def benchmark(
@@ -207,16 +212,18 @@ t according to psychology studies done recently? Do you knonw?", 64, 128)
     print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
 
     # Compute the latency statistics.
-    avg_latency = np.mean([latency for _, _, latency in REQUEST_LATENCY])
+    avg_first_latency = np.mean([latency for _, _, _, latency in REQUEST_LATENCY])
+    print(f"Average first latency: {avg_first_latency:.2f} s")
+    avg_latency = np.mean([latency for _, _, latency, _ in REQUEST_LATENCY])
     print(f"Average latency: {avg_latency:.2f} s")
     avg_per_token_latency = np.mean([
         latency / (prompt_len + output_len)
-        for prompt_len, output_len, latency in REQUEST_LATENCY
+        for prompt_len, output_len, latency, _ in REQUEST_LATENCY
     ])
     print(f"Average latency per token: {avg_per_token_latency:.2f} s")
     avg_per_output_token_latency = np.mean([
         latency / output_len
-        for _, output_len, latency in REQUEST_LATENCY
+        for _, output_len, latency, _ in REQUEST_LATENCY
     ])
     print("Average latency per output token: "
           f"{avg_per_output_token_latency:.2f} s")
