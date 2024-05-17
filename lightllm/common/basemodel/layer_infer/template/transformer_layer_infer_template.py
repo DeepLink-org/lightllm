@@ -75,8 +75,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._context_attention_kernel(q, cache_k, cache_v, infer_state, layer_weight)
         q = None
         o = self._get_o(o, infer_state, layer_weight)
-        if self.world_size_ > 1:
-            dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o.view(-1, self.embed_dim_))
         return
 
@@ -85,8 +85,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
         input1 = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
 
@@ -100,8 +100,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._token_attention_kernel(q, infer_state, layer_weight)
         q = None
         o = self._get_o(o, infer_state, layer_weight)
-        if self.world_size_ > 1:
-            dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o.view(-1, self.embed_dim_))
         return
 
@@ -110,8 +110,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
         input1 = None
-        if self.world_size_ > 1:
-            dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
     

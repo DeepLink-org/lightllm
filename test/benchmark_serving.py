@@ -143,7 +143,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate_stream'
+    url = 'http://localhost:8000/generate'
       
     data = {
         'inputs': prompt,
@@ -151,6 +151,7 @@ async def send_request(
             'do_sample': False,
             'ignore_eos': True,
             'max_new_tokens': output_len,
+            'frequency_penalty':1
              # 'temperature': 0.1,
         }
     }

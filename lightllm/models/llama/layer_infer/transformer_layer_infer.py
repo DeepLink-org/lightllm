@@ -36,12 +36,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.head_dim_ = network_config["hidden_size"] // network_config["num_attention_heads"]
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
-        # from torch.distributed.distributed_c10d import _get_default_group, _get_pg_default_device
-        # assert dist.is_initialized()
-        # default_pg = _get_default_group()
-        # default_pg_device = _get_pg_default_device(default_pg)
-        # dicl_pg = default_pg._get_backend(default_pg_device)
-        # self.pg_comm_name = dicl_pg.get_comm_name(dist.get_rank())
+        from torch.distributed.distributed_c10d import _get_default_group, _get_pg_default_device
+        assert dist.is_initialized()
+        default_pg = _get_default_group()
+        default_pg_device = _get_pg_default_device(default_pg)
+        dicl_pg = default_pg._get_backend(default_pg_device)
+        self.pg_comm_name = dicl_pg.get_comm_name(dist.get_rank())
         return
     
     def _bind_func(self):
@@ -185,9 +185,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return o_tensor
     
     def _get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
-        # o_tensor = torch.empty((input.shape[0], layer_weight.o_weight_.shape[1]), dtype=input.dtype, device=input.device)
-        # matmul_all_reduce(o_tensor, input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_, None, self.pg_comm_name)
+        # o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+        o_tensor = torch.empty((input.shape[0], layer_weight.o_weight_.shape[1]), dtype=input.dtype, device=input.device)
+        matmul_all_reduce(o_tensor, input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_, None, self.pg_comm_name)
         return o_tensor
 
     def _ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
@@ -197,9 +197,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         input = None
         ffn1_out = gate_out * up_out
         gate_out, up_out = None, None
-        ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
-        # ffn2_out = torch.empty((ffn1_out.shape[0], layer_weight.down_proj.shape[1]), dtype=ffn1_out.dtype, device=ffn1_out.device)
-        # matmul_all_reduce(ffn2_out, ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
+        # ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
+        ffn2_out = torch.empty((ffn1_out.shape[0], layer_weight.down_proj.shape[1]), dtype=ffn1_out.dtype, device=ffn1_out.device)
+        matmul_all_reduce(ffn2_out, ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
         ffn1_out = None
         return ffn2_out
     
@@ -243,7 +243,6 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                 o_tensor.view(calcu_shape1),
                                 infer_state.b_seq_len_cpu_long,
                                 infer_state.block_table,
-                                # infer_state.req_manager.get_batched_block_table(infer_state.b_req_idx),
                                 PagingRequestManager.BLOCK_SIZE)
         return o_tensor
 
