@@ -9,7 +9,7 @@ from lightllm.common.paging.block_manager.default_block_manager import DefaultBl
 from lightllm.common.paging.request import Request
 from lightllm.common.req_manager import ReqManager
 from lightllm.utils.log_utils import init_logger
-from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
+import lightllm.common.basemodel.triton_kernel.destindex_copy_kv
 
 
 logger = init_logger(__name__)
@@ -72,8 +72,8 @@ class PagingRequestManager(ReqManager):
         # assert k.shape[0] == infer_state.b_seq_len.shape[0]
         # last_block_offsets = (infer_state.b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
         # cache_starts = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
-        destindex_copy_kv(k, infer_state.kv_start_indices, self.mem_manager.key_buffer[layer_num])
-        destindex_copy_kv(v, infer_state.kv_start_indices, self.mem_manager.value_buffer[layer_num])
+        lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(k, infer_state.kv_start_indices, self.mem_manager.key_buffer[layer_num])
+        lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(v, infer_state.kv_start_indices, self.mem_manager.value_buffer[layer_num])
         
 
     def fill_kv_cache_prefill(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
@@ -93,8 +93,8 @@ class PagingRequestManager(ReqManager):
                 block_k = single_k[kv_start:kv_start+offset]
                 block_v = single_v[kv_start:kv_start+offset]
                 idx = torch.arange(cache_start, cache_start+offset, 1, dtype=torch.int32, device='cuda')
-                destindex_copy_kv(block_k, idx, self.mem_manager.key_buffer[layer_num])
-                destindex_copy_kv(block_v, idx, self.mem_manager.value_buffer[layer_num])
+                lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(block_k, idx, self.mem_manager.key_buffer[layer_num])
+                lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(block_v, idx, self.mem_manager.value_buffer[layer_num])
 
 
     def alloc(self, need_size):
