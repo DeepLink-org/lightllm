@@ -69,33 +69,14 @@ class PagingRequestManager(ReqManager):
             self.fill_kv_cache_prefill(layer_num, k, v, infer_state)
 
     def fill_kv_cache_decode(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
-        # assert k.shape[0] == infer_state.b_seq_len.shape[0]
-        # last_block_offsets = (infer_state.b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
-        # cache_starts = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
         lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(k, infer_state.kv_start_indices, self.mem_manager.key_buffer[layer_num])
         lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(v, infer_state.kv_start_indices, self.mem_manager.value_buffer[layer_num])
         
 
     def fill_kv_cache_prefill(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
-        for b_idx in range(infer_state.batch_size):
-            seq_len = infer_state.b_seq_len_cpu_long[b_idx]
-            start = b_idx * infer_state.max_len_in_batch
-            end = start + seq_len
-            single_k = k[start:end]
-            single_v = v[start:end]
-            block_number = _div_up(seq_len, PagingRequestManager.BLOCK_SIZE)
-            last_block_offset = seq_len - (block_number - 1) * PagingRequestManager.BLOCK_SIZE
-            for num in range(block_number):
-                block_idx = infer_state.block_table_cpu[b_idx][num]
-                offset = last_block_offset if block_number - 1 == num else PagingRequestManager.BLOCK_SIZE
-                cache_start = block_idx * PagingRequestManager.BLOCK_SIZE
-                kv_start = num * PagingRequestManager.BLOCK_SIZE
-                block_k = single_k[kv_start:kv_start+offset]
-                block_v = single_v[kv_start:kv_start+offset]
-                idx = torch.arange(cache_start, cache_start+offset, 1, dtype=torch.int32, device='cuda')
-                lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(block_k, idx, self.mem_manager.key_buffer[layer_num])
-                lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(block_v, idx, self.mem_manager.value_buffer[layer_num])
-
+        nopad_k, nopad_v = k[infer_state.kv_start_indices], v[infer_state.kv_start_indices]
+        lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(nopad_k, infer_state.block_indices, self.mem_manager.key_buffer[layer_num])
+        lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(nopad_v, infer_state.block_indices, self.mem_manager.value_buffer[layer_num])
 
     def alloc(self, need_size):
         if need_size > self.can_use_req_size:

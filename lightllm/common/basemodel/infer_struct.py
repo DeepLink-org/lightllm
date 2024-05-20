@@ -32,7 +32,6 @@ class InferStateInfo:
         self.multimodal_params = None
         self.block_indices = None
         self.kv_start_indices = None
-        self.block_table_cpu = []
         self.block_table: torch.Tensor = None
     
 

@@ -8,6 +8,7 @@ from lightllm.common.basemodel.layer_weights.hf_load_utils import load_hf_weight
 from lightllm.common.basemodel.infer_struct import InferStateInfo
 from lightllm.common.basemodel.splitfuse_infer_struct import SplitFuseInferStateInfo
 from lightllm.common.mem_manager import MemoryManager
+from lightllm.common.paging.block import _div_up
 from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.common.req_manager import ReqManager
 from lightllm.common.infer_utils import init_req_to_token_indexes
@@ -175,9 +176,22 @@ class TpPartBaseModel:
         infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
     
         infer_state.init_some_extra_state(self, input_ids)
+        infer_state.block_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
+        infer_state.kv_start_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
+        kv_start = 0
         for b_idx in range(batch_size):
-            block_table = self.req_manager.get_block_table(int(b_req_idx[b_idx]))
-            infer_state.block_table_cpu.append(block_table.tolist())
+            seq_len = infer_state.b_seq_len_cpu_long[b_idx]
+            start = b_idx * infer_state.max_len_in_batch
+            infer_state.kv_start_indices[kv_start:kv_start+seq_len] = torch.arange(start, start+seq_len, 1, dtype=torch.int32, device='cuda')
+            block_list = self.req_manager.get_block_table(int(b_req_idx[b_idx])).tolist()
+            block_number = _div_up(seq_len, PagingRequestManager.BLOCK_SIZE)
+            last_block_offset = seq_len - (block_number - 1) * PagingRequestManager.BLOCK_SIZE
+            for num in range(block_number):
+                block_idx = block_list[num]
+                offset = last_block_offset if block_number - 1 == num else PagingRequestManager.BLOCK_SIZE
+                cache_start = block_idx * PagingRequestManager.BLOCK_SIZE
+                infer_state.block_indices[kv_start:kv_start+offset] = torch.arange(cache_start, cache_start+offset, 1, dtype=torch.int32, device='cuda')
+                kv_start += offset
 
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
