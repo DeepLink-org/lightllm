@@ -15,7 +15,7 @@ from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
 # from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
-
+import torch_dipu
 torch.backends.cudnn.enabled = True
 
 
@@ -137,6 +137,7 @@ class TpPartBaseModel:
 
 
     @torch.no_grad()
+    @torch.profiler.record_function('forward')
     def forward(
             self,
             batch_size,
@@ -159,9 +160,8 @@ class TpPartBaseModel:
         else:
             return self._decode(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
-    
+    @torch.profiler.record_function('prefill')
     def _prefill(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
-        
         infer_state.is_prefill = True
         infer_state.return_all_prompt_logprobs = self.return_all_prompt_logprobs
         infer_state.batch_size = batch_size
@@ -202,6 +202,7 @@ class TpPartBaseModel:
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
     
+    @torch.profiler.record_function('decode')
     def _decode(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state.is_prefill = False
         infer_state.batch_size = batch_size

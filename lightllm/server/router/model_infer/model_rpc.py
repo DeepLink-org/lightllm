@@ -1,4 +1,5 @@
 import asyncio
+import os
 import numpy as np
 import rpyc
 import torch
@@ -37,7 +38,7 @@ from .infer_batch import requests_mapping
 from .infer_batch import InferReq
 from lightllm.server.io_struct import ReqRunStatus
 from lightllm.utils.log_utils import init_logger
-
+import torch_dipu
 
 class ModelRpcServer(rpyc.Service):
 
@@ -229,10 +230,19 @@ class ModelRpcServer(rpyc.Service):
             kwargs, run_reqs, not_run_reqs = prepare_decode_inputs(batch)
         
         if len(run_reqs) >= 1:
-            logits = self.model.forward(**kwargs)
-            next_token_ids, next_token_probs = sample(logits, run_reqs)
-            next_token_ids = next_token_ids.detach().cpu().numpy()
-            next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
+            path = f"./timeline_{is_prefill}"
+            if self.tp_rank == 1 and os.getenv('LIGHTLLM_DIPU_TRACE_PROFILE', False):
+                profile_ctx = torch_dipu.profiler.NativeProfile(path, False)
+                with profile_ctx:
+                    logits = self.model.forward(**kwargs)
+                    next_token_ids, next_token_probs = sample(logits, run_reqs)
+                    next_token_ids = next_token_ids.detach().cpu().numpy()
+                    next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
+            else:
+                logits = self.model.forward(**kwargs)
+                next_token_ids, next_token_probs = sample(logits, run_reqs)
+                next_token_ids = next_token_ids.detach().cpu().numpy()
+                next_token_logprobs = torch.log(next_token_probs).detach().cpu().numpy()
 
             for req_obj, next_token_id, next_token_logprob in zip(run_reqs, next_token_ids, next_token_logprobs):
                 # prefill and decode is same

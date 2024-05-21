@@ -194,18 +194,107 @@ def main(args: argparse.Namespace):
     # tokenizer = get_tokenizer(args.tokenizer, "slow")
     # input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
 
+#     input_request = ("What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?", 64, 128)
+#     input_request = ("What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw? hi? hi", 256, 512)
+    
     input_request = ("What daily habits might improve mental health considering factors like sleep quality, s\
 ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
 might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
-t according to psychology studies done recently? Do you knonw?", 64, 128)
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw? hi? hi What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+t according to psychology studies done recently? Do you knonw? hi? hi hi", 512, 128)
+#     input_request = ("What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw? hi? hi What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw? hi? hi hi What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw? hi? hi What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw?What daily habits might improve mental health considering factors like sleep quality, s\
+# ocial interaction, and exercise impact according to psychology studies done recently?   What daily habits \
+# might improve mental health considering factors like sleep quality, social interaction, and exercise impac\
+# t according to psychology studies done recently? Do you knonw? hi? hi hi hi", 1024, 1024)
     input_requests = [input_request for i in range(args.num_prompts)]
-
+    loop = 10
     benchmark_start_time = time.time()
-    asyncio.run(benchmark(input_requests, args.request_rate))
+    for _ in range(loop):
+        asyncio.run(benchmark(input_requests, args.request_rate))
     benchmark_end_time = time.time()
     benchmark_time = benchmark_end_time - benchmark_start_time
     print(f"Total time: {benchmark_time:.2f} s")
-    print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
+    print(f"Throughput: {args.num_prompts * loop / benchmark_time:.2f} requests/s")
 
     # Compute the latency statistics.
     first_latency_list = [latency for _, _, _, latency in REQUEST_LATENCY]

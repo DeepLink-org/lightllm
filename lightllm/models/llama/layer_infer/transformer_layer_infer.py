@@ -88,6 +88,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
             self._splitfuse_attention_kernel = partial(LlamaTransformerLayerInfer._splitfuse_attention_kernel, self)
         return
 
+    @torch.profiler.record_function('att norm  ')
     def _att_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         out = infer_state.rms_norm_out
         inv_rms = infer_state.inv_rms
@@ -95,6 +96,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         rms_norm(out, inv_rms, input, weight.shape, weight, None, self.eps_)
         return out
     
+    @torch.profiler.record_function('ffn norm  ')
     def _ffn_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         out = infer_state.rms_norm_out
         inv_rms = infer_state.inv_rms
@@ -102,6 +104,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         rms_norm(out, inv_rms, input, weight.shape, weight, None, self.eps_)
         return out
 
+    @torch.profiler.record_function('get qkv   ')
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         torch.mm(input, layer_weight.q_weight_,
                      out=infer_state.q)
@@ -119,6 +122,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
       
         return infer_state.q, cache_k, cache_v
     
+    @torch.profiler.record_function('context attn')
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
         o_tensor = infer_state.attention_out if out is None else out
         context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
@@ -191,12 +195,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
             torch.cuda.default_stream().wait_event(infer_state.end_event)
         return o_tensor
     
+    @torch.profiler.record_function('get o')
     def _get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         # o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
         o_tensor = infer_state.matmul_all_reduce_out
         matmul_all_reduce(o_tensor, input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_, None, self.pg_comm_name)
         return o_tensor
 
+    @torch.profiler.record_function('ffn')
     def _ffn(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         gate_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.gate_proj)
         torch.nn.functional.silu(gate_out, inplace=True)
@@ -207,6 +213,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         matmul_all_reduce(infer_state.ffn2_out, infer_state.ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
         return infer_state.ffn2_out
     
+    @torch.profiler.record_function('copy kv')
     def _copy_kv_to_mem_cache_normal(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
         destindex_copy_kv(value_buffer, mem_index, mem_manager.value_buffer[self.layer_num_])
@@ -235,6 +242,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                     mem_manager.value_scale_buffer[self.layer_num_])
         return
     
+    @torch.profiler.record_function('token attn')
     def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
@@ -250,6 +258,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                 PagingRequestManager.BLOCK_SIZE)
         return o_tensor
 
+    @torch.profiler.record_function('token gqa attn')
     def _token_decode_gqa_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
