@@ -305,7 +305,7 @@ async def chat_completions(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8008)
 
     parser.add_argument("--model_dir", type=str, default=None,
                         help="the model weight dir path, the app will load config, weights and tokenizer from this dir")
@@ -328,7 +328,7 @@ def main():
                         help="the max value for req input tokens num")
     parser.add_argument("--max_req_total_len", type=int, default=2048 + 1024,
                         help="the max value for req_input_len + req_output_len")
-    parser.add_argument("--nccl_port", type=int, default=28765,
+    parser.add_argument("--nccl_port", type=int, default=28768,
                         help="the nccl_port to build a distributed environment for PyTorch")
     parser.add_argument("--mode", type=str, default=[], nargs='+',
                         help="""Model mode: [triton_int8kv | ppl_int8kv | ppl_fp16 | triton_flashdecoding 

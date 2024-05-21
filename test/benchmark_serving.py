@@ -31,6 +31,15 @@ from transformers import AutoModelForCausalLM, PreTrainedTokenizerBase
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast)
 
+def generate_random_string_by_normal(lower:float = 1, upper:float = 1024, num:int=1, mean=None, std=None):
+    letters = "    abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789__!?-"
+    mean = int(np.sqrt(lower * upper)) if mean is None else mean
+    std = int(np.sqrt(upper - lower)) if std is None else std
+    lengths = np.clip(np.round(np.random.normal(mean,std,num)).astype(int),lower, upper).astype(int)
+    # print(lengths)
+    return [np.random.choice(list(letters), len).astype('S1').tostring().decode('utf-8') for len in lengths]
+
+
 def get_tokenizer(
     tokenizer_name: str,
     tokenizer_mode: str = "auto",
@@ -61,8 +70,8 @@ def get_tokenizer(
     return tokenizer
 
 # (prompt len, output len, latency)
-REQUEST_LATENCY: List[Tuple[int, int, float]] = []
-
+REQUEST_LATENCY: List[Tuple[int, int, float, float]] = []
+TOKEN_THROUGHPUT:float = None
 
 def sample_requests(
     dataset_path: str,
@@ -143,7 +152,7 @@ async def send_request(
     request_start_time = time.time()
     headers = {'Content-Type': 'application/json'}
     headers = {"User-Agent": "Benchmark Client"}
-    url = 'http://localhost:8000/generate_stream'
+    url = 'http://localhost:8008/generate_stream'
       
     data = {
         'inputs': prompt,
@@ -155,7 +164,20 @@ async def send_request(
         }
     }
     first_latency = -1
+    # response = requests.request("POST", url, headers=headers, json=data, stream=True)
+    # response.encoding = 'utf-8'
+    # for line in response.iter_lines(decode_unicode=True):
+    #     if line:
+    #         line = line[5:]
+    #         output = json.loads(line)
+    #         if first_latency == -1:
+    #             first_latency = time.time() - request_start_time
+    #         if output['finished'] == True:
+    #             break
+
+
     timeout = aiohttp.ClientTimeout(total=3 * 3600)
+    output_inv_cnt = 0
     async with aiohttp.ClientSession(timeout=timeout) as session:
         # while True:
             async with session.post(url, headers=headers, json=data) as response:
@@ -164,12 +186,15 @@ async def send_request(
                         if first_latency == -1:
                             # line = json.loads(line.decode("utf-8")[5:])
                             first_latency = time.time() - request_start_time
+                        else:
+                            output_inv_cnt += 1
                         # print(line)
             #     chunks = []
             #     async for chunk, _ in response.content.iter_chunks():
             #         chunks.append(chunk)
             # output = b"".join(chunks).decode("utf-8")
             # # output = json.loads(output)
+            # print(f"aaa:{output}")
             # if "error" not in output:
             #     break
 
@@ -183,12 +208,22 @@ async def benchmark(
     request_rate: float,
 ) -> None:
     tasks: List[asyncio.Task] = []
+
     async for request in get_request(input_requests, request_rate):
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(send_request(prompt,
                                                 prompt_len, output_len))
         tasks.append(task)
+
+    loop = asyncio.get_event_loop()
+    start_time = loop.time()
     await asyncio.gather(*tasks)
+    end_time = loop.time()
+    elapsed_time = end_time - start_time
+    global TOKEN_THROUGHPUT
+    TOKEN_THROUGHPUT = np.sum([output_token_num for _, output_token_num, _, _ in REQUEST_LATENCY]) / elapsed_time 
+
+
 
 
 def main(args: argparse.Namespace):
@@ -212,21 +247,31 @@ t according to psychology studies done recently? Do you knonw?", 64, 128)
     print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
 
     # Compute the latency statistics.
-    avg_first_latency = np.mean([latency for _, _, _, latency in REQUEST_LATENCY])
-    print(f"Average first latency: {avg_first_latency:.2f} s")
-    avg_latency = np.mean([latency for _, _, latency, _ in REQUEST_LATENCY])
-    print(f"Average latency: {avg_latency:.2f} s")
+    avg_first_latency = np.mean([first_latency for _, _, _, first_latency in REQUEST_LATENCY])
+    print(f"Average first latency(TTFT): {avg_first_latency:.2f} s")
+    avg_request_latency = np.mean([request_latency for _, _, request_latency, _ in REQUEST_LATENCY])
+    print(f"Average request latency: {avg_request_latency:.2f} s")
     avg_per_token_latency = np.mean([
-        latency / (prompt_len + output_len)
-        for prompt_len, output_len, latency, _ in REQUEST_LATENCY
+        request_latency / (prompt_len + output_len)
+        for prompt_len, output_len, request_latency, _ in REQUEST_LATENCY
     ])
     print(f"Average latency per token: {avg_per_token_latency:.2f} s")
     avg_per_output_token_latency = np.mean([
-        latency / output_len
-        for _, output_len, latency, _ in REQUEST_LATENCY
+        request_latency / output_len
+        for _, output_len, request_latency, _ in REQUEST_LATENCY
     ])
     print("Average latency per output token: "
           f"{avg_per_output_token_latency:.2f} s")
+    
+    avg_per_output_subseq_token_latency = np.mean([
+        (request_latency - first_latency) / (output_len - 1)
+        for _, output_len, request_latency, first_latency in REQUEST_LATENCY
+    ])
+    print("Average latency per subsequent output token(TPOT): "
+          f"{avg_per_output_subseq_token_latency:.2f} s")
+    
+    print("token throughput: " 
+          f"{TOKEN_THROUGHPUT:.2f} s")
 
 
 if __name__ == "__main__":
