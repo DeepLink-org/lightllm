@@ -77,7 +77,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._get_o(o, infer_state, layer_weight)
         # if self.world_size_ > 1:
         #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
-        input_embding.add_(o.view(-1, self.embed_dim_))
+        input_embding.add_(o)
         return
 
     @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
@@ -87,7 +87,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input1 = None
         # if self.world_size_ > 1:
         #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
-        input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
+        input_embdings.add_(ffn_out)
         return
 
     # this impl dont to use @mark_cost_time
@@ -102,7 +102,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._get_o(o, infer_state, layer_weight)
         # if self.world_size_ > 1:
         #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
-        input_embding.add_(o.view(-1, self.embed_dim_))
+        input_embding.add_(o)
         return
 
     # this impl dont to use @mark_cost_time
@@ -112,7 +112,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input1 = None
         # if self.world_size_ > 1:
         #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
-        input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
+        input_embdings.add_(ffn_out)
         return
     
     # @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why

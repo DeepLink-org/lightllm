@@ -2,9 +2,13 @@ import torch
 
 
 def torch_rms_norm(x, weight, eps):
+    print("can not be here!")
     return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight
 
 rmsnorm_forward = torch_rms_norm
+
+def rms_norm(out, inv_rms, input, weight_shape, weight, bias, eps):
+    pass
 
 def test_rms_norm(M, N, dtype, eps=1e-5, device='cuda'):
     # create data

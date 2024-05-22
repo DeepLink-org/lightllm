@@ -26,6 +26,9 @@ class InferStateInfo:
         self.mem_end = None
         self.key_buffer = None
         self.value_buffer = None
+        self.tp_q_head_num = None
+        self.head_dim = None
+        self.embed_dim = None
 
         self.is_splitfuse = False
         self.return_all_prompt_logprobs = False

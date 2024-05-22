@@ -12,7 +12,7 @@ from lightllm.models.llama.triton_kernel.context_flashattention_nopad import con
 from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import paged_token_attention, matmul_all_reduce
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_reduceV import token_att_fwd2, token_att_fwd2_int8v
-from lightllm.models.llama.triton_kernel.rmsnorm import rmsnorm_forward
+from lightllm.models.llama.triton_kernel.rmsnorm import rms_norm, rmsnorm_forward
 from lightllm.models.llama.triton_kernel.rotary_emb import rotary_emb_fwd, rotary_emb_v2_fwd
 from lightllm.models.llama.triton_kernel.token_attention_softmax_and_reducev import token_softmax_reducev_fwd
 
@@ -89,35 +89,42 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return
 
     def _att_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return rmsnorm_forward(input, weight=layer_weight.att_norm_weight_, eps=self.eps_)
+        out = infer_state.rms_norm_out
+        inv_rms = infer_state.inv_rms
+        weight = layer_weight.att_norm_weight_
+        rms_norm(out, inv_rms, input, weight.shape, weight, None, self.eps_)
+        return out
     
     def _ffn_norm(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        return rmsnorm_forward(input, weight=layer_weight.ffn_norm_weight_, eps=self.eps_)
+        out = infer_state.rms_norm_out
+        inv_rms = infer_state.inv_rms
+        weight = layer_weight.ffn_norm_weight_
+        rms_norm(out, inv_rms, input, weight.shape, weight, None, self.eps_)
+        return out
 
     def _get_qkv(self, input, cache_k, cache_v, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
-        q = torch.mm(input.view(-1, self.embed_dim_), layer_weight.q_weight_)
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.k_weight_,
-                    out=cache_k.view(-1, self.tp_k_head_num_ * self.head_dim_))
+        torch.mm(input, layer_weight.q_weight_,
+                     out=infer_state.q)
+        torch.mm(input, layer_weight.k_weight_,
+                    out=cache_k)
       
-        torch.mm(input.view(-1, self.embed_dim_), layer_weight.v_weight_,
-                    out=cache_v.view(-1, self.tp_v_head_num_ * self.head_dim_))
-      
-        pos_shape = infer_state.position_cos.shape
+        torch.mm(input, layer_weight.v_weight_,
+                    out=cache_v)
         rotary_emb_v2_fwd(
-            q.view(-1, self.tp_q_head_num_, self.head_dim_),
-            cache_k,
-            infer_state.position_cos.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
-            infer_state.position_sin.view(1, pos_shape[0], 1, pos_shape[1]).repeat(1,1,1,2),
+            infer_state.q,
+            cache_k.view(-1, self.tp_k_head_num_, self.head_dim_),
+            infer_state.position_cos,
+            infer_state.position_sin,
         )
       
-        return q, cache_k, cache_v
+        return infer_state.q, cache_k, cache_v
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
-        o_tensor = torch.empty_like(q) if out is None else out
+        o_tensor = infer_state.attention_out if out is None else out
         context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
                             k.view(-1, self.tp_k_head_num_, self.head_dim_),
                             v.view(-1, self.tp_v_head_num_, self.head_dim_),
-                            o_tensor.view(-1, self.tp_q_head_num_, self.head_dim_),
+                            o_tensor,
                             infer_state.b_start_loc,
                             infer_state.b_seq_len_cpu_long,
                             infer_state.max_len_in_batch)
@@ -186,7 +193,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def _get_o(self, input, infer_state:LlamaInferStateInfo, layer_weight:LlamaTransformerLayerWeight)->torch.Tensor:
         # o_tensor = torch.mm(input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
-        o_tensor = torch.empty((input.shape[0], layer_weight.o_weight_.shape[1]), dtype=input.dtype, device=input.device)
+        o_tensor = infer_state.matmul_all_reduce_out
         matmul_all_reduce(o_tensor, input.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_, None, self.pg_comm_name)
         return o_tensor
 
@@ -195,13 +202,10 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         torch.nn.functional.silu(gate_out, inplace=True)
         up_out = torch.mm(input.view(-1, self.embed_dim_), layer_weight.up_proj)
         input = None
-        ffn1_out = gate_out * up_out
+        torch.mul(gate_out, up_out, out=infer_state.ffn1_out)
         gate_out, up_out = None, None
-        # ffn2_out = torch.mm(ffn1_out, layer_weight.down_proj)
-        ffn2_out = torch.empty((ffn1_out.shape[0], layer_weight.down_proj.shape[1]), dtype=ffn1_out.dtype, device=ffn1_out.device)
-        matmul_all_reduce(ffn2_out, ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
-        ffn1_out = None
-        return ffn2_out
+        matmul_all_reduce(infer_state.ffn2_out, infer_state.ffn1_out, layer_weight.down_proj, None, self.pg_comm_name)
+        return infer_state.ffn2_out
     
     def _copy_kv_to_mem_cache_normal(self, key_buffer, value_buffer, mem_index, mem_manager):
         destindex_copy_kv(key_buffer, mem_index, mem_manager.key_buffer[self.layer_num_])
@@ -232,15 +236,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return
     
     def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-        total_token_num = infer_state.total_token_num
         batch_size = infer_state.batch_size
         calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
         
-        o_tensor = torch.empty_like(q) if out is None else out
+        o_tensor = infer_state.attention_out if out is None else out
         paged_token_attention(q.view(calcu_shape1),
                                 infer_state.mem_manager.key_buffer[self.layer_num_],
                                 infer_state.mem_manager.value_buffer[self.layer_num_],
-                                o_tensor.view(calcu_shape1),
+                                o_tensor,
+                                self.tp_k_head_num_,
                                 infer_state.b_seq_len_cpu_long,
                                 infer_state.block_table,
                                 PagingRequestManager.BLOCK_SIZE)
