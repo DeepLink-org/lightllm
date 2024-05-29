@@ -179,8 +179,8 @@ class TpPartBaseModel:
 
         self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
         infer_state.mem_is_contiguous = False
-        infer_state.key_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.key_buffer = torch.empty((batch_size* max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size* max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
         infer_state.kv_start_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
@@ -223,7 +223,6 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_table = self.req_manager.get_batched_block_table(b_req_idx)
         infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')

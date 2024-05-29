@@ -66,7 +66,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         raise Exception("need to impl")
 
 
-    @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why
+    # @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why
     @torch.profiler.record_function('context attn')
     def _context_attention(self, input_embding, infer_state: InferStateInfo, layer_weight):
         input1 = self._att_norm(input_embding, infer_state, layer_weight)
@@ -77,19 +77,14 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._context_attention_kernel(q, cache_k, cache_v, infer_state, layer_weight)
         q = None
         o = self._get_o(o, infer_state, layer_weight)
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o)
         return
 
-    @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
+    # @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
     @torch.profiler.record_function('ffn')
     def _context_ffn(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
-        input1 = None
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn_out)
         return
 

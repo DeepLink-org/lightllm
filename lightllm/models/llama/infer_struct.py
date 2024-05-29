@@ -29,23 +29,18 @@ class LlamaInferStateInfo(InferStateInfo):
         return
     
     def init_tmp_out(self):
+        token_num = 0
         if self.is_prefill:
-            self.rms_norm_out = torch.empty([self.total_token_num, self.embed_dim], dtype=torch.float16, device='cuda')
-            self.matmul_all_reduce_out = torch.empty([self.total_token_num, self.embed_dim], dtype=torch.float16, device='cuda')
-            self.ffn1_out = torch.empty([self.total_token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
-            self.ffn2_out = torch.empty([self.total_token_num, self.embed_dim], dtype=torch.float16, device='cuda')
-            self.attention_out = torch.empty([self.total_token_num, self.tp_q_head_num, self.head_dim], dtype=torch.float16, device='cuda')
-            self.q = torch.empty([self.total_token_num, self.tp_q_head_num, self.head_dim], dtype=torch.float16, device='cuda')
+            token_num = self.total_token_num
         else:
-            self.rms_norm_out = torch.empty([self.b_seq_len.shape[0], self.embed_dim], dtype=torch.float16, device='cuda')
-            self.matmul_all_reduce_out = torch.empty([self.b_seq_len.shape[0], self.embed_dim], dtype=torch.float16, device='cuda')
-            self.ffn1_out = torch.empty([self.b_seq_len.shape[0], self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
-            self.ffn2_out = torch.empty([self.b_seq_len.shape[0], self.embed_dim], dtype=torch.float16, device='cuda')
-            self.attention_out = torch.empty([self.b_seq_len.shape[0], self.tp_q_head_num, self.head_dim], dtype=torch.float16, device='cuda')
-            self.q = torch.empty([self.b_seq_len.shape[0], self.tp_q_head_num, self.head_dim], dtype=torch.float16, device='cuda')
+            token_num = self.b_seq_len.shape[0]
 
+        self.rms_norm_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
+        self.matmul_all_reduce_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
+        self.ffn1_out = torch.empty([token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
+        self.ffn2_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
+        self.gate_out = torch.empty([token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
+        self.up_out = torch.empty([token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
+        self.attention_out = torch.empty([token_num, self.tp_q_head_num* self.head_dim], dtype=torch.float16, device='cuda')
+        self.q = torch.empty([token_num, self.tp_q_head_num* self.head_dim], dtype=torch.float16, device='cuda')
         self.inv_rms = torch.empty(list(self.rms_norm_out.shape[:-1]) + [1], dtype=torch.float32, device='cuda')
-
-
-   
-        

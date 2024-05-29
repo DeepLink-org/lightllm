@@ -24,9 +24,9 @@ def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_len
     assert k_cache.shape[1] == v_cache.shape[1]
     batch, head, dim = q.shape
     kv_cache_len = k_cache.shape[0]
-    q = q.reshape(batch, head*dim).unsqueeze(1)
-    k_cache = k_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
-    v_cache = v_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+    q = q.view(batch, 1, head* dim) #reshape(batch, head*dim).unsqueeze(1)
+    k_cache = k_cache.view( kv_cache_len,1, numKeyValueHeads* dim)#.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+    v_cache = v_cache.view( kv_cache_len,1, numKeyValueHeads* dim)# .reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
     # current_lens = b_seq_len.cpu().numpy().tolist()
     out = torch.empty_like(q)
     
@@ -163,8 +163,10 @@ def test_token_attention():
     other_kv_index = 0
     o_torch = torch.empty_like(q)
 
-    ext.token_decode_attention_inference_batch_one(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
+    torch_token_attention(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
                           b_start_loc, b_seq_len, max_len_in_batch, other_kv_index)
+    # ext.token_decode_attention_inference_batch_one(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
+    #                       b_start_loc, b_seq_len, max_len_in_batch, other_kv_index)
     # print(o_torch)
 
     # o_ext = torch.empty_like(q)
@@ -190,5 +192,5 @@ if __name__ == "__main__":
     import torch_dipu
     import deeplink_ext.cpp_extensions as ext
     # test_incre_flash_attn()
-    for i in range(20):
+    for i in range(3):
         test_token_attention()

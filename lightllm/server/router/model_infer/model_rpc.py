@@ -231,7 +231,7 @@ class ModelRpcServer(rpyc.Service):
         
         if len(run_reqs) >= 1:
             path = f"./timeline_{is_prefill}"
-            if self.tp_rank == 1 and os.getenv('LIGHTLLM_DIPU_TRACE_PROFILE', False):
+            if self.tp_rank == 0 and os.getenv('LIGHTLLM_DIPU_TRACE_PROFILE', False):
                 profile_ctx = torch_dipu.profiler.NativeProfile(path, False)
                 with profile_ctx:
                     logits = self.model.forward(**kwargs)
