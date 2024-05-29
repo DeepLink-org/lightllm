@@ -23,7 +23,7 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
 
         return
 
-    def pre_context_forward(self, input_ids, layer_weight, default_pg=None):
+    def pre_context_forward(self, input_ids, layer_weight, default_pg):
         bool1 = input_ids.lt(self.vob_start_id_)
         bool2 = input_ids.ge(self.vob_end_id_)
         input_mask = torch.logical_or(bool1, bool2)
@@ -36,7 +36,7 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
             input_embdings = funcol.all_reduce(input_embdings, "sum", default_pg)
         return input_embdings
 
-    def pre_token_forward(self, input_ids, layer_weight, default_pg=None):
+    def pre_token_forward(self, input_ids, layer_weight, default_pg):
         bool1 = input_ids.lt(self.vob_start_id_)
         bool2 = input_ids.ge(self.vob_end_id_)
         input_mask = torch.logical_or(bool1, bool2)
@@ -49,11 +49,11 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
             input_embdings = funcol.all_reduce(input_embdings, "sum", default_pg)
         return input_embdings
 
-    def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg=None):
+    def context_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg):
         input_embdings = self.pre_context_forward(input_ids, layer_weight.wte_weight_, default_pg)
         return input_embdings
 
-    def token_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg=None):
+    def token_forward(self, input_ids, infer_state: LlamaInferStateInfo, layer_weight: LlamaPreAndPostLayerWeight, default_pg):
         input_embdings = self.pre_token_forward(input_ids, layer_weight.wte_weight_, default_pg)
         return input_embdings
     

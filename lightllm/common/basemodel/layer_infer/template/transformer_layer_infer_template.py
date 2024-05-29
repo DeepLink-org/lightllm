@@ -13,8 +13,8 @@ from torch.profiler import record_function
 class TransformerLayerInferTpl(TransformerLayerInfer):
     """
     """
-    def __init__(self, layer_num, tp_rank, world_size, network_config, mode):
-        super().__init__(layer_num, tp_rank, world_size, network_config, mode)
+    def __init__(self, layer_num, tp_rank, world_size, network_config, mode, dynamic_compiler=False):
+        super().__init__(layer_num, tp_rank, world_size, network_config, mode, dynamic_compiler=False)
         # need to set by subclass
         self.eps_ = 1e-5 
         self.tp_q_head_num_ = -1

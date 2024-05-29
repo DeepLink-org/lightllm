@@ -25,7 +25,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
     """
 
-    def __init__(self, layer_num, tp_rank, world_size, network_config, mode=[]):
+    def __init__(self, layer_num, tp_rank, world_size, network_config, mode=[], dynamic_compiler=False):
         super().__init__(layer_num, tp_rank, world_size, network_config, mode)
         self.eps_ = network_config["rms_norm_eps"]
         self.tp_q_head_num_ = network_config["num_attention_heads"] // self.world_size_
@@ -36,14 +36,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         self.embed_dim_ = network_config["hidden_size"]
         self._bind_func()
 
-        self.opt_context_pre_process = torch.compile(self.context_pre_process, backend='ascendgraph', dynamic=False)
-        self.opt_context_post_process = torch.compile(self.context_post_process, backend='ascendgraph', dynamic=False)
-        self.opt_token_pre_process = torch.compile(self.token_pre_process, backend='ascendgraph', dynamic=False)
-        self.opt_token_post_process = torch.compile(self.token_post_process, backend='ascendgraph', dynamic=False)
-        self.opt_ascend_prompt_attention_inference = torch.compile(self.ascend_prompt_attention_kernel, backend='ascendgraph', dynamic=False)
-        self.opt_ascend_incre_attention_kernel = torch.compile(self.ascend_incre_attention_kernel, backend='ascendgraph', dynamic=False)
-        self.opt_full_context_attention= torch.compile(self.full_context_attention, backend='ascendgraph', dynamic=False)
-        self.opt_full_token_attention= torch.compile(self.full_token_attention, backend='ascendgraph', dynamic=False)
+        self.opt_context_pre_process = torch.compile(self.context_pre_process, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_context_post_process = torch.compile(self.context_post_process, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_token_pre_process = torch.compile(self.token_pre_process, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_token_post_process = torch.compile(self.token_post_process, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_ascend_prompt_attention_inference = torch.compile(self.ascend_prompt_attention_kernel, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_ascend_incre_attention_kernel = torch.compile(self.ascend_incre_attention_kernel, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_full_context_attention= torch.compile(self.full_context_attention, backend='ascendgraph', dynamic=dynamic_compiler)
+        self.opt_full_token_attention= torch.compile(self.full_token_attention, backend='ascendgraph', dynamic=dynamic_compiler)
 
         return
     
@@ -186,7 +186,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         out = self.opt_ascend_prompt_attention_inference(q.view(batch, -1, num_head * head_dim), 
                                                             k.view(batch, -1, num_head * head_dim), 
                                                             v.view(batch, -1, num_head * head_dim), 
-                                                            seqlen, num_head, head_dim)
+                                                            seqlen, 32, 128)
+                                                            # seqlen, num_head, head_dim)
 
         out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
 
@@ -213,7 +214,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
         # post cache_kv
         start_index = infer_state.int_index_list[0]
-        end_index = infer_state.int_index_list[0] + 1
+        end_index = infer_state.int_index_list[0] + cache_k.shape[0]
         infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k
         infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v
 
@@ -248,7 +249,10 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         return input_embding
 
     def full_token_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, current_len, max_seq_length, default_pg=None):
-        q = self.opt_token_pre_process(input_embding, infer_state, layer_weight)
-        o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.mem_manager.key_buffer[self.layer_num_], infer_state.mem_manager.value_buffer[self.layer_num_], infer_state.int_index_list_t, max_seq_length)
-        out = self.opt_token_post_process(o, input_embding, infer_state, layer_weight, default_pg)
+        q = self.opt_token_pre_process(
+            input_embding, infer_state, layer_weight)
+        o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.mem_manager.key_buffer[
+                                                   self.layer_num_], infer_state.mem_manager.value_buffer[self.layer_num_], infer_state.int_index_list_t, max_seq_length)  # max_seq_length 5 * 1024
+        out = self.opt_token_post_process(
+            o, input_embding, infer_state, layer_weight, default_pg)
         return out

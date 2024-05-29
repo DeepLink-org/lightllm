@@ -46,6 +46,7 @@ class TpPartBaseModel:
         self.max_req_num = kvargs.get("max_req_num", 1000)
         self.max_seq_length = kvargs.get("max_seq_length", 1024 * 5)
         self.return_all_prompt_logprobs = kvargs.get("return_all_prompt_logprobs", False)
+        self.dynamic = kvargs.get("dynamic_compiler", False)
 
         self._init_config()
         self._verify_must()
@@ -57,9 +58,9 @@ class TpPartBaseModel:
         self._init_some_value()
         self._init_custom()
 
-        self.opt_context_forward = torch.compile(self._context_forward, backend='ascendgraph', dynamic=False)
-        self.opt_token_forward = torch.compile(self._token_forward, backend='ascendgraph', dynamic=False)
-        self.opt_all_layer_token_forward_with_pre_post_process = torch.compile(self.all_layer_token_forward_with_pre_post_process, backend='ascendgraph', dynamic=False)
+        self.opt_context_forward = torch.compile(self._context_forward, backend='ascendgraph', dynamic=self.dynamic)
+        self.opt_token_forward = torch.compile(self._token_forward, backend='ascendgraph', dynamic=self.dynamic)
+        self.opt_all_layer_token_forward_with_pre_post_process = torch.compile(self.all_layer_token_forward_with_pre_post_process, backend='ascendgraph', dynamic=self.dynamic)
 
         return
     
@@ -124,7 +125,8 @@ class TpPartBaseModel:
                 tp_rank=self.tp_rank_,
                 world_size=self.world_size_,
                 network_config=self.config,
-                mode=self.mode) for i in range(
+                mode=self.mode,
+                dynamic_compiler=self.dynamic) for i in range(
                 self.config["n_layer"])]
         return
     
@@ -236,7 +238,7 @@ class TpPartBaseModel:
         predict_logics = self.opt_token_forward(input_ids, infer_state, default_pg)
 
         return predict_logics
-    
+
     @torch.no_grad()
     def splitfuse_forward(
             self, 
@@ -314,20 +316,20 @@ class TpPartBaseModel:
     @final
     def _context_forward(self, input_ids, infer_state: InferStateInfo, default_pg):
         input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight, default_pg)
-        for i in range(self.layers_num):
-        # for i in range(2):
+        # for i in range(self.layers_num):
+        for i in range(1):
             input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i], default_pg)
 
-        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, return_logics=True, default_pg=default_pg)
+        predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, default_pg, return_logics=True)
         
         return predict_logics
     
     def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, current_len, max_seq_length, batch_size, default_pg):
         input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight, default_pg)
-        for i in range(self.layers_num):
-        # for i in range(1):
+        # for i in range(self.layers_num):
+        for i in range(1):
             input_embs = self.layers_infer[i].opt_full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length, default_pg)
-        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, return_logics=True, default_pg=default_pg)
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, default_pg, return_logics=True)
         
         return predict_logics
 
@@ -337,7 +339,6 @@ class TpPartBaseModel:
         with record_function('token_forward_with_pre_post_process'):
             batch_size = infer_state.batch_size
             cuda_input_ids = input_ids
-            assert infer_state.batch_size == 1
             predict_logics = self.all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, infer_state.int_index_list[0], self.max_seq_length, batch_size, default_pg)
 
         return predict_logics
