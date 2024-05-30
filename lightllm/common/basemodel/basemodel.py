@@ -46,7 +46,7 @@ class TpPartBaseModel:
         self.max_req_num = kvargs.get("max_req_num", 1000)
         self.max_seq_length = kvargs.get("max_seq_length", 1024 * 5)
         self.return_all_prompt_logprobs = kvargs.get("return_all_prompt_logprobs", False)
-        self.dynamic = kvargs.get("dynamic_compiler", False)
+        self.dynamic = kvargs.get("dynamic_compiler", True)
 
         self._init_config()
         self._verify_must()

@@ -60,6 +60,8 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,
             "is_prefill": True,
+            "masks": [],
+            "is_padding": False,
         }
         if is_multimodal:
             kwargs["multimodal_params"] = batch_multimodal_params
@@ -107,7 +109,9 @@ def prepare_decode_inputs(batch:InferBatch):
             "b_req_idx": nopad_b_req_idx,
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,
-            "is_prefill": False            
+            "is_prefill": False,
+            "masks": [],
+            "is_padding": False,            
         }
         return kwargs, run_reqs, not_run_reqs
     else:

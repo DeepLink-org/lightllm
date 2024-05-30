@@ -36,7 +36,8 @@ class BaseLayerWeight:
     
     def _try_cat_to(self, source_tensor_names, dest_name, cat_dim, handle_func=None):
         if all(hasattr(self, src_name) for src_name in source_tensor_names) and not hasattr(self, dest_name):
-            with self.lock:
+            # with self.lock:
+            if True:
                 if all(hasattr(self, src_name) for src_name in source_tensor_names) and not hasattr(self, dest_name):
                     tensors = [getattr(self, name, None) for name in source_tensor_names]
                     ans = torch.cat(tensors, dim=cat_dim)
