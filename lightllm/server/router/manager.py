@@ -157,7 +157,7 @@ class RouterManager:
                 self.stats_tool.print_stats()
                 
             if self.running_batch is None:
-                await asyncio.sleep(2.01)  # 10ms
+                await asyncio.sleep(0.01)  # 10ms
 
     async def _step(self):
         """
