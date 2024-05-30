@@ -16,7 +16,7 @@ logger = init_logger(__name__)
 
     
 class PagingRequestManager(ReqManager):
-    BLOCK_SIZE = 128
+    BLOCK_SIZE = 512
     def __init__(self, max_request_num, max_sequence_length, mem_manager):
         self.req_state = torch.zeros((max_request_num,), dtype=torch.bool, device="cuda")
         self.req_to_token_indexs = torch.zeros((max_request_num, max_sequence_length), dtype=torch.int32, device="cuda")
