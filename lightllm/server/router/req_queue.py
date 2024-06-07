@@ -121,9 +121,9 @@ class ReqQueue:
             else:
                 break
         
-        if len(can_run_list) != 0 and len(can_run_list) != 8:
-            print(f"batch = {len(can_run_list)}, ignore", flush=True)
-            return None
+        # if len(can_run_list) != 0 and len(can_run_list) != 8:
+        #     print(f"batch = {len(can_run_list)}, ignore", flush=True)
+        #     return None
 
         if len(can_run_list) != 0:
             new_batch = Batch(uuid.uuid4().hex, can_run_list)

@@ -8,7 +8,7 @@ from functools import partial
 
 from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.models.llama.layer_weights.transformer_layer_weight import LlamaTransformerLayerWeight
-from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd
+from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd, prompt_flash_attention
 from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import paged_token_attention, matmul_all_reduce
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_reduceV import token_att_fwd2, token_att_fwd2_int8v
@@ -123,13 +123,17 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     @torch.profiler.record_function('context attn')
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
         o_tensor = infer_state.attention_out if out is None else out
-        context_attention_fwd(q, k, v, o_tensor,
-                            infer_state.b_start_loc,
-                            infer_state.b_seq_len_cpu_long,
-                            infer_state.max_len_in_batch,
-                            self.tp_q_head_num_,
-                            self.tp_k_head_num_,
-                            self.head_dim_)
+        # context_attention_fwd(q, k, v, o_tensor,
+        #                     infer_state.b_start_loc,
+        #                     infer_state.b_seq_len_cpu_long,
+        #                     infer_state.max_len_in_batch,
+        #                     self.tp_q_head_num_,
+        #                     self.tp_k_head_num_,
+        #                     self.head_dim_)
+        prompt_flash_attention(o_tensor, q, k, v, infer_state.context_attenion_mask, 
+                               infer_state.b_seq_len_cpu_long, 
+                               infer_state.max_len_in_batch, self.tp_q_head_num_,
+                               self.tp_k_head_num_, self.head_dim_)
         return o_tensor
     
     def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
@@ -239,18 +243,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     @torch.profiler.record_function('token attn')
     def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
-        batch_size = infer_state.batch_size
-        calcu_shape1 = (batch_size, self.tp_q_head_num_, self.head_dim_)
-        
         o_tensor = infer_state.attention_out if out is None else out
-        paged_token_attention(q,
+        paged_token_attention(o_tensor, q,
                             infer_state.mem_manager.key_buffer[self.layer_num_],
                             infer_state.mem_manager.value_buffer[self.layer_num_],
-                            o_tensor,
+                            infer_state.b_seq_len_cpu_long,
                             self.tp_q_head_num_,
                             self.tp_k_head_num_,
                             self.head_dim_,
-                            infer_state.b_seq_len_cpu_long,
                             infer_state.block_table,
                             PagingRequestManager.BLOCK_SIZE)
         return o_tensor

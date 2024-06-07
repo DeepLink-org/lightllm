@@ -32,6 +32,9 @@ class LlamaInferStateInfo(InferStateInfo):
         token_num = 0
         if self.is_prefill:
             token_num = self.total_token_num
+            self.context_attenion_mask = torch.logical_not(torch.tril(torch.ones(self.max_len_in_batch, self.max_len_in_batch, dtype=torch.bool, device="cuda"), diagonal=0)
+                    .repeat(self.batch_size, 1, 1))
+                    
         else:
             token_num = self.b_seq_len.shape[0]
 
