@@ -41,6 +41,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
     def _get_qkv(self, input, cache_k, cache_v, infer_state:InferStateInfo, layer_weight)->Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise Exception("need to impl")
     
+    @torch.profiler.record_function('post kv')
     def _post_cache_kv(self, cache_k, cache_v, infer_state:InferStateInfo, layer_weight):
         infer_state.req_manager.fill_kv_cache(self.layer_num_, cache_k, cache_v, infer_state)
     
@@ -65,7 +66,8 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         raise Exception("need to impl")
 
 
-    @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why
+    # @mark_cost_time("trans context flash forward time cost")  # dont to remove this, will make performence down, did not know why
+    @torch.profiler.record_function('context attn')
     def _context_attention(self, input_embding, infer_state: InferStateInfo, layer_weight):
         input1 = self._att_norm(input_embding, infer_state, layer_weight)
         cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
@@ -75,22 +77,19 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         o = self._context_attention_kernel(q, cache_k, cache_v, infer_state, layer_weight)
         q = None
         o = self._get_o(o, infer_state, layer_weight)
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(o, op=dist.ReduceOp.SUM, async_op=False)
         input_embding.add_(o)
         return
 
-    @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
+    # @mark_cost_time("trans context ffn forward time cost")  # dont to remove this, will make performence down, did not know why
+    @torch.profiler.record_function('ffn')
     def _context_ffn(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
-        input1 = None
-        # if self.world_size_ > 1:
-        #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn_out)
         return
 
     # this impl dont to use @mark_cost_time
+    @torch.profiler.record_function('token attn')
     def _token_attention(self, input_embding, infer_state: InferStateInfo, layer_weight):
         input1 = self._att_norm(input_embding, infer_state, layer_weight)
         cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
@@ -106,6 +105,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         return
 
     # this impl dont to use @mark_cost_time
+    @torch.profiler.record_function('ffn')
     def _token_ffn(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
         ffn_out = self._ffn(input1, infer_state, layer_weight)
@@ -140,6 +140,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
     
+    @torch.profiler.record_function('context forward')
     def context_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         self._context_attention(input_embdings,
                                       infer_state,
@@ -147,6 +148,7 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
         self._context_ffn(input_embdings, infer_state, layer_weight)
         return input_embdings
 
+    @torch.profiler.record_function('token forward')
     def token_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
         self._token_attention(input_embdings,
                                     infer_state,

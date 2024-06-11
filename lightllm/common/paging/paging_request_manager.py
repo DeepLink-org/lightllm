@@ -16,7 +16,7 @@ logger = init_logger(__name__)
 
     
 class PagingRequestManager(ReqManager):
-    BLOCK_SIZE = 128
+    BLOCK_SIZE = 512
     def __init__(self, max_request_num, max_sequence_length, mem_manager):
         self.req_state = torch.zeros((max_request_num,), dtype=torch.bool, device="cuda")
         self.req_to_token_indexs = torch.zeros((max_request_num, max_sequence_length), dtype=torch.int32, device="cuda")
@@ -62,11 +62,10 @@ class PagingRequestManager(ReqManager):
 
     def fill_kv_cache(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
         assert k.shape[0] == v.shape[0]
-        batch = infer_state.b_start_loc.shape[0]
-        if batch == k.shape[0]:
-            self.fill_kv_cache_decode(layer_num, k, v, infer_state)
-        else:
+        if infer_state.is_prefill:
             self.fill_kv_cache_prefill(layer_num, k, v, infer_state)
+        else:
+            self.fill_kv_cache_decode(layer_num, k, v, infer_state)
 
     def fill_kv_cache_decode(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
         lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(k, infer_state.kv_start_indices, self.mem_manager.key_buffer[layer_num])
@@ -74,7 +73,10 @@ class PagingRequestManager(ReqManager):
         
 
     def fill_kv_cache_prefill(self, layer_num: int, k: Tensor, v: Tensor, infer_state:InferStateInfo):
-        nopad_k, nopad_v = k[infer_state.kv_start_indices], v[infer_state.kv_start_indices]
+        if k.shape[0] == infer_state.kv_start_indices.shape[0]:
+            nopad_k, nopad_v = k, v
+        else:
+            nopad_k, nopad_v = k[infer_state.kv_start_indices], v[infer_state.kv_start_indices]
         lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(nopad_k, infer_state.block_indices, self.mem_manager.key_buffer[layer_num])
         lightllm.common.basemodel.triton_kernel.destindex_copy_kv.destindex_copy_kv(nopad_v, infer_state.block_indices, self.mem_manager.value_buffer[layer_num])
 

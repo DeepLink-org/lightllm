@@ -1,6 +1,8 @@
 import torch
+from torch.profiler import record_function
 
 @torch.no_grad()
+@record_function('apply_penalty')
 def apply_penalty_v2(Logits, presence_penalty, freqency_penalty, repetition_penalty, p_token_ids,
                         p_token_counts, p_cumsum_seq_len, p_max_len_in_batch):
     pass

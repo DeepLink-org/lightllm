@@ -12,53 +12,78 @@ def token_decode_attention_fwd(q, k, v, out, req_to_tokens, b_req_idx, b_start_l
     print("running token_decode_attention_fwd")
     return
 
-def paged_token_attention(q, k_cache, v_cache, out, b_seq_len, block_table, block_size):
+def paged_token_attention(*args, **kwargs):
     raise Exception("should running paged_token_attention in ext")
 
 def matmul_all_reduce(out, x1, x2, bias, group):
     print("running matmul_all_reduce")
     return
 
-def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_lens, block_table: Tensor, block_size: int):
-    numKeyValueHeads = k_cache.shape[1]
-    assert k_cache.shape[1] == v_cache.shape[1]
-    batch, head, dim = q.shape
-    kv_cache_len = k_cache.shape[0]
-    q = q.reshape(batch, head*dim).unsqueeze(1)
-    k_cache = k_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
-    v_cache = v_cache.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_lens, block_table: Tensor, block_size: int, head, kv_head, dim):
+    # numKeyValueHeads = k_cache.shape[1]
+    # assert k_cache.shape[1] == v_cache.shape[1]
+    # batch, head, dim = q.shape
+    # kv_cache_len = k_cache.shape[0]
+    # q = q.view(batch, 1, head* dim) #reshape(batch, head*dim).unsqueeze(1)
+    # k_cache = k_cache.view( kv_cache_len,1, numKeyValueHeads* dim)#.reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
+    # v_cache = v_cache.view( kv_cache_len,1, numKeyValueHeads* dim)# .reshape(kv_cache_len, numKeyValueHeads*dim).unsqueeze(0)
     # current_lens = b_seq_len.cpu().numpy().tolist()
     out = torch.empty_like(q)
     
+    # ext.paged_attention(out, q, k_cache, v_cache,
+    #                     None, None, 
+    #                     current_lens, block_table, head, numKeyValueHeads,
+    #                     1.0 / math.sqrt(dim), "BSH", block_size, 0, 
+    #                     None, None, None, None, None, None, None, None
+    #                     )
     ext.paged_attention(out, q, k_cache, v_cache,
-                        None, None, 
-                        current_lens, block_table, head, numKeyValueHeads,
-                        1.0 / math.sqrt(dim), "BSH", block_size, 0, 
-                        None, None, None, None, None, None, None, None
-                        )
-    return out.squeeze().reshape((batch, head, dim))
+                        current_lens, head, kv_head,
+                        dim, block_table, block_size)
+    return out
 
 
-def torch_token_attention(q, k, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, other_kv_index):
-    # q: BSH
-    batch, head, dim = b_loc.shape[0], q.shape[1], q.shape[2]
-    q_device = q.device
-    xq = q.view(batch, 1, head, dim).transpose(1, 2)
-    for i in range(batch):
-        # token_attention
-        k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=q_device, dtype=torch.int32)]
-        key = k[k_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
-        # out_loc = b_start_loc[i] + torch.arange(0, b_seq_len[i], device=q_device)
-        # out[:, out_loc] = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
-        logics = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
+# def torch_token_attention(q, k, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, head, kv_head, dim):
+#     # q: BSH
+#     batch = b_loc.shape[0]
+#     q_device = q.device
+#     xq = q.view(batch, 1, head, dim).transpose(1, 2)
+#     k = k.view(-1, kv_head, dim)
+#     v = v.view(-1, kv_head, dim)
+#     out = out.view(batch, head, dim)
+#     for i in range(batch):
+#         # token_attention
+#         k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=q_device, dtype=torch.int32)]
+#         key = k[k_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
+#         # out_loc = b_start_loc[i] + torch.arange(0, b_seq_len[i], device=q_device)
+#         # out[:, out_loc] = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
+#         logics = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(head, b_seq_len[i])
 
-        # token_softmax_reducev
-        v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device, dtype=torch.int32)]
-        # P = logics[:, b_start_loc[i]:b_start_loc[i] + b_seq_len[i]].softmax(-1).reshape(1, head,  1, b_seq_len[i])
-        P = logics.softmax(-1).reshape(1, head,  1, b_seq_len[i])
-        V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
-        out[i, :] = torch.matmul(P, V).view(head, dim)
-    return
+#         # token_softmax_reducev
+#         v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device, dtype=torch.int32)]
+#         # P = logics[:, b_start_loc[i]:b_start_loc[i] + b_seq_len[i]].softmax(-1).reshape(1, head,  1, b_seq_len[i])
+#         P = logics.softmax(-1).reshape(1, head,  1, b_seq_len[i])
+#         V = v[v_loc, :].view(1, b_seq_len[i], head, dim).transpose(1, 2)
+#         out[i, :] = torch.matmul(P, V).view(head, dim)
+#     return
+def torch_token_attention(out, query, key, value, actualSeqLengths, numHeads, numKeyValueHeads, dim, blockTable, blockSize):
+        # q: BSH
+        b_loc = torch.arange(key.shape[0], dtype=torch.int32).reshape(1, -1).cuda()
+        batch = b_loc.shape[0]
+        xq = query.view(batch, 1, numHeads, dim).transpose(1, 2)
+        k = key.view(-1, numKeyValueHeads, dim)
+        v = value.view(-1, numKeyValueHeads, dim)
+        out = out.view(batch, numHeads, dim)
+        max_input_len = max(actualSeqLengths)
+        b_seq_len = torch.tensor(actualSeqLengths, dtype=torch.int32).cuda()
+        for i in range(batch):
+            k_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=query.device, dtype=torch.int32)]
+            key = k[k_loc, :].view(1, b_seq_len[i], numHeads, dim).transpose(1, 2)
+            logics = (torch.matmul(xq[i, :], key.transpose(2, 3)) / math.sqrt(dim)).reshape(numHeads, b_seq_len[i])
+            v_loc = b_loc[i][max_input_len - b_seq_len[i] + torch.arange(0, b_seq_len[i], device=logics.device, dtype=torch.int32)]
+            P = logics.softmax(-1).reshape(1, numHeads,  1, b_seq_len[i])
+            V = v[v_loc, :].view(1, b_seq_len[i], numHeads, dim).transpose(1, 2)
+            out[i, :] = torch.matmul(P, V).view(numHeads, dim)
+        return out.view(-1, numHeads * dim)
 
 def ext_token_attention(q, k, v, out, b_loc, b_start_loc, b_seq_len, max_input_len, other_kv_index):
     if q.shape[0] >= 2:
@@ -142,10 +167,10 @@ def test_incre_flash_attn():
 
 def test_token_attention():
     # BND S=1
-    q = torch.randn(1, 32, 128, dtype=torch.float16).cuda()
+    q = torch.randn(1, 32* 128, dtype=torch.float16).cuda()
     # SND
-    k = torch.randn(1026, 32, 128, dtype=torch.float16).cuda()
-    v = torch.randn(1026, 32, 128, dtype=torch.float16).cuda()
+    k = torch.randn(1026, 32* 128, dtype=torch.float16).cuda()
+    v = torch.randn(1026, 32* 128, dtype=torch.float16).cuda()
 
     if q.shape[0] == 1:
         req_to_token_indexs = torch.arange(1026, dtype=torch.int32).reshape(1, 1026).cuda()
@@ -163,8 +188,11 @@ def test_token_attention():
     other_kv_index = 0
     o_torch = torch.empty_like(q)
 
-    ext.token_decode_attention_inference_batch_one(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
-                          b_start_loc, b_seq_len, max_len_in_batch, other_kv_index)
+    # torch_token_attention(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
+    #                       b_start_loc, b_seq_len, max_len_in_batch, 32, 32, 128)
+    
+    # ext.token_decode_attention_inference_batch_one(q, k, v, o_torch, req_to_token_indexs[b_req_idx],
+    #                       b_start_loc, b_seq_len, max_len_in_batch, other_kv_index)
     # print(o_torch)
 
     # o_ext = torch.empty_like(q)
@@ -182,7 +210,10 @@ def test_token_attention():
     # [3,5,7,],
     # [1,2,8,]
     ], dtype=torch.int32, device="cuda")
-    o_ext = ext_paged_attention(q, k, v,current_lens ,block_table,blk_size )
+
+    o_torch = torch_token_attention(o_torch, q, k, v, current_lens , 32, 32, 128,block_table,blk_size )
+
+    o_ext = ext_paged_attention(q, k, v,current_lens ,block_table,blk_size, 32, 32, 128 )
     # print(o_ext)
     print(torch.allclose(o_torch.cpu(), o_ext.cpu(), rtol=1e-2, atol=1e-2))
 
@@ -190,5 +221,5 @@ if __name__ == "__main__":
     import torch_dipu
     import deeplink_ext.cpp_extensions as ext
     # test_incre_flash_attn()
-    for i in range(20):
+    for i in range(3):
         test_token_attention()

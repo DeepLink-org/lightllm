@@ -15,7 +15,7 @@ from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
 # from lightllm.common.basemodel.triton_kernel.splitfuse_copy_kv_index_to_req import splitfuse_copy_kv_index_to_req
-
+import torch_dipu
 torch.backends.cudnn.enabled = True
 
 
@@ -137,6 +137,7 @@ class TpPartBaseModel:
 
 
     @torch.no_grad()
+    @torch.profiler.record_function('forward')
     def forward(
             self,
             batch_size,
@@ -159,9 +160,8 @@ class TpPartBaseModel:
         else:
             return self._decode(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
-    
+    @torch.profiler.record_function('prefill')
     def _prefill(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
-        
         infer_state.is_prefill = True
         infer_state.return_all_prompt_logprobs = self.return_all_prompt_logprobs
         infer_state.batch_size = batch_size
@@ -179,8 +179,8 @@ class TpPartBaseModel:
 
         self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
         infer_state.mem_is_contiguous = False
-        infer_state.key_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.key_buffer = torch.empty((batch_size* max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size* max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
         infer_state.kv_start_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
@@ -202,6 +202,7 @@ class TpPartBaseModel:
         predict_logics = self._context_forward(input_ids, infer_state)
         return predict_logics
     
+    @torch.profiler.record_function('decode')
     def _decode(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state.is_prefill = False
         infer_state.batch_size = batch_size
@@ -222,7 +223,6 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_table = self.req_manager.get_batched_block_table(b_req_idx)
         infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')
