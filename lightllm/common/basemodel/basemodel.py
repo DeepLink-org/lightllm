@@ -199,10 +199,14 @@ class TpPartBaseModel:
                             max_len_in_batch, infer_state.mem_index, self.max_seq_length)
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
+        
+        infer_state.req_to_token_indexs_list = self.req_manager.req_to_token_indexs.tolist()
+        infer_state.b_seq_len_list = infer_state.b_seq_len.tolist()
+
         default_pg = None
         if self.world_size_ > 1:
             default_pg = dist.distributed_c10d._get_default_group()
-        predict_logics = self.opt_context_forward(input_ids, infer_state, default_pg)
+        predict_logics = self._context_forward(input_ids, infer_state, default_pg)
 
         return predict_logics
     
@@ -235,7 +239,7 @@ class TpPartBaseModel:
         default_pg = None
         if self.world_size_ > 1:
             default_pg = dist.distributed_c10d._get_default_group()
-        predict_logics = self.opt_token_forward(input_ids, infer_state, default_pg)
+        predict_logics = self._token_forward(input_ids, infer_state, default_pg)
 
         return predict_logics
 
@@ -328,7 +332,7 @@ class TpPartBaseModel:
         input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight, default_pg)
         # for i in range(self.layers_num):
         for i in range(1):
-            input_embs = self.layers_infer[i].opt_full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length, default_pg)
+            input_embs = self.layers_infer[i].full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length, default_pg)
         predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, default_pg, return_logics=True)
         
         return predict_logics

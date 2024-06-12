@@ -67,30 +67,12 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     model_part = model_class(model_kvargs)
     print('################### 2')
 
-    if is_padding:
-        total_len = min(model_kvargs["max_seq_length"], max_prompt_size + output_len)
-    else:
-        total_len = min(model_kvargs["max_seq_length"], input_len + output_len)
+    total_len = min(model_kvargs["max_seq_length"], input_len + output_len)
 
     # warm up
-    if is_padding:
-        tmp_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
-        tmp_data = torch.from_numpy(tmp_data).cuda()
 
-        test_data = np.vstack([np.arange(5, max_prompt_size + 5) for _ in range(batch_size)])
-        test_data = torch.from_numpy(test_data).cuda()
-
-        left_pad_size_list = []
-        for k, t in enumerate(tmp_data):
-            left_pad_size = max_prompt_size - len(t)
-            left_pad_size_list.append(left_pad_size)
-            test_data[k, left_pad_size:] = torch.tensor(t).long()
-            if left_pad_size > 0:
-                test_data[k, 0: left_pad_size] = torch.full((1, left_pad_size), 0).cuda().long()
-    else:
-        left_pad_size_list = torch.full((batch_size, ), 0)
-        test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
-        test_data = torch.from_numpy(test_data).cuda()
+    test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
+    test_data = torch.from_numpy(test_data).cuda()
 
     test_data = test_data.reshape(-1)
 
@@ -99,17 +81,11 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
 
     for i in range(batch_size):
-        if is_padding:
-            b_start_loc[i] = i * max_prompt_size
-            b_seq_len[i] = max_prompt_size
-        else:
-            b_start_loc[i] = i * input_len
-            b_seq_len[i] = input_len
+        b_start_loc[i] = i * input_len
+        b_seq_len[i] = input_len
 
-    if is_padding:
-        start_pos = max_prompt_size
-    else:
-        start_pos = input_len
+ 
+    start_pos = input_len
     prev_pos = 0
 
     for cur_pos in range(start_pos, total_len + 1):
@@ -135,6 +111,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             predict_ids = predict_ids.detach().cpu().numpy()
             print(logics, flush=True)
             print(f"Success_prefill: {predict_ids}.", flush=True)
+            # break
         else:
             masks = []
 
@@ -148,8 +125,12 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
         prev_pos = cur_pos
-        print(logics, flush=True)
-        print(f"Success: {predict_ids}.", flush=True)
+    print(logics, flush=True)
+    print(f"Success: {predict_ids}.", flush=True)
+
+    ans_queue.put(True)
+
+    return
 
     # model_part.mem_manager.free_all()
     # model_part.req_manager.free_all()
@@ -259,6 +240,6 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     # if rank_id == 0:
     #     print("time total cost(ms):", (end_time - start_time) * 1000)
 
-    # ans_queue.put(True)
+    ans_queue.put(True)
 
     return
