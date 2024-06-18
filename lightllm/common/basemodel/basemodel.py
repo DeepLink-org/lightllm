@@ -17,6 +17,9 @@ from lightllm.common.infer_utils import init_req_to_token_indexes
 from lightllm.common.build_utils import repair_config
 from lightllm.common.basemodel.triton_kernel.copy_kv_index_to_req import copy_kv_index_to_req
 
+from lightllm.common.paging.block import _div_up
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
+
 torch.backends.cudnn.enabled = True
 
 
@@ -111,7 +114,7 @@ class TpPartBaseModel:
         return
     
     def _init_req_manager(self):
-        self.req_manager = ReqManager(self.max_req_num, 
+        self.req_manager = PagingRequestManager(self.max_req_num, 
                                       self.max_seq_length,
                                       self.mem_manager)
         return 
@@ -132,8 +135,10 @@ class TpPartBaseModel:
     
     def _init_some_value(self):
         self.head_dim_ = self.config["n_embed"] // self.config["num_attention_heads"]
+        self.tp_q_head_num_ = self.config["num_attention_heads"] // self.world_size_
         self.tp_k_head_num_ = self.config["num_key_value_heads"] // self.world_size_
         self.tp_v_head_num_ = self.tp_k_head_num_
+        self.embed_dim_ = self.config["hidden_size"]
         self.layers_num = self.config["n_layer"]
         self.vocab_size = self.config["vocab_size"]
         return
@@ -156,49 +161,56 @@ class TpPartBaseModel:
             b_seq_len : torch.Tensor,
             multimodal_params=None,
             is_prefill=True):
+        infer_state = self.infer_state_class()
+        infer_state.tp_q_head_num = self.tp_q_head_num_
+        infer_state.head_dim = self.head_dim_
+        infer_state.layer0_weight = self.trans_layers_weight[0]
+        infer_state.embed_dim = self.embed_dim_
         if is_prefill:
-            predict_logics = self._prefill(batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            predict_logics = self._prefill(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
             return predict_logics
         else:
-            return self._decode(batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            return self._decode(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
     @record_function('_prefill')    
-    def _prefill(self, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
-        infer_state = self.infer_state_class()
+    def _prefill(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state.is_prefill = True
         infer_state.return_all_prompt_logprobs = self.return_all_prompt_logprobs
         infer_state.batch_size = batch_size
         infer_state.total_token_num = total_token_num
         infer_state.max_len_in_batch = max_len_in_batch
-        assert (input_ids.shape[0] == total_token_num)
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.b_seq_len_cpu_long = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
 
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
-        alloc_mem = self.mem_manager.alloc_contiguous(infer_state.total_token_num, self.max_seq_length * batch_size)
-        if alloc_mem is not None:
-            infer_state.mem_is_contiguous = True
-            infer_state.mem_index = alloc_mem[0]
-            infer_state.mem_start = alloc_mem[1]
-            infer_state.mem_end = alloc_mem[2]
-
-        else:
-            assert()
-            infer_state.mem_is_contiguous = False
-            alloc_mem = self.mem_manager.alloc(infer_state.total_token_num)
-            infer_state.mem_index = alloc_mem
-            infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-            infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        
-        init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
-                            max_len_in_batch, infer_state.mem_index, self.max_seq_length)
-
+        self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
+        infer_state.mem_is_contiguous = False
+        infer_state.key_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
+        infer_state.block_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
+        infer_state.kv_start_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
+        kv_start = 0
+        for b_idx in range(batch_size):
+            seq_len = infer_state.b_seq_len_cpu_long[b_idx]
+            start = b_idx * infer_state.max_len_in_batch
+            infer_state.kv_start_indices[kv_start:kv_start+seq_len] = torch.arange(start, start+seq_len, 1, dtype=torch.int32, device='cuda')
+            block_list = self.req_manager.get_block_table(int(b_req_idx[b_idx])).tolist()
+            block_number = _div_up(seq_len, PagingRequestManager.BLOCK_SIZE)
+            last_block_offset = seq_len - (block_number - 1) * PagingRequestManager.BLOCK_SIZE
+            for num in range(block_number):
+                block_idx = block_list[num]
+                offset = last_block_offset if block_number - 1 == num else PagingRequestManager.BLOCK_SIZE
+                cache_start = block_idx * PagingRequestManager.BLOCK_SIZE
+                infer_state.block_indices[kv_start:kv_start+offset] = torch.arange(cache_start, cache_start+offset, 1, dtype=torch.int32, device='cuda')
+                kv_start += offset
+
         default_pg = None
         if self.world_size_ > 1:
             default_pg = dist.distributed_c10d._get_default_group()
@@ -207,8 +219,12 @@ class TpPartBaseModel:
         return predict_logics
     
     @record_function('_decode')
-    def _decode(self, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
-        infer_state = self.infer_state_class()
+    def _decode(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
+        print('####: block_size: ', PagingRequestManager.BLOCK_SIZE)
+        print('####: q_head_num: ', self.tp_q_head_num_)
+        print('####: kv_head_num: ', self.tp_k_head_num_)
+        print('####: dim: ', self.head_dim_)
+        print('####: o_head_num: ', self.layers_infer[0].tp_o_head_num_)
         infer_state.is_prefill = False
         infer_state.batch_size = batch_size
         infer_state.total_token_num = total_token_num
@@ -216,22 +232,34 @@ class TpPartBaseModel:
         assert (b_req_idx.shape[0] == b_start_loc.shape[0] == b_seq_len.shape[0])
         infer_state.b_req_idx = b_req_idx
         infer_state.b_start_loc = b_start_loc
+        infer_state.b_seq_len_cpu_long = b_seq_len.cpu().numpy().tolist()
         infer_state.b_seq_len = b_seq_len
         infer_state.multimodal_params = multimodal_params
         
         infer_state.mem_manager = self.mem_manager
         infer_state.req_manager = self.req_manager
 
+        self.req_manager.alloc_page(b_req_idx, infer_state.b_seq_len_cpu_long)
+
         infer_state.mem_is_contiguous = False
-        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
-
-        infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
-
-        infer_state.int_index_list = infer_state.mem_index.tolist()
-        infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
-
+        infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
+        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
+        infer_state.block_table = self.req_manager.get_batched_block_table(b_req_idx)
+        infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')
+        for b_idx in range(batch_size):
+            req = self.req_manager.req_map[int(b_req_idx[b_idx])]
+            block_table = self.req_manager.block_manager.get_block_table(req)
+            block_idx = block_table[req.num_blocks() - 1]
+            infer_state.block_indices[b_idx] = block_idx
+
+        last_block_offsets = (b_seq_len - 1) % PagingRequestManager.BLOCK_SIZE
+        infer_state.kv_start_indices = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
+        infer_state.int_index_list = infer_state.kv_start_indices.tolist()
+        infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
+        
+        
         default_pg = None
         if self.world_size_ > 1:
             default_pg = dist.distributed_c10d._get_default_group()

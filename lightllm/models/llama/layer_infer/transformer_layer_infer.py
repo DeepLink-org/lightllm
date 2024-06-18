@@ -20,7 +20,7 @@ from lightllm.models.llama.infer_struct import LlamaInferStateInfo
 from lightllm.common.basemodel.triton_kernel.destindex_copy_kv import destindex_copy_kv
 from lightllm.common.basemodel import TransformerLayerInferTpl
 
-
+from lightllm.common.paging.paging_request_manager import PagingRequestManager
 class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     """
     """
@@ -143,8 +143,9 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         cache_v = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_).view(-1, self.tp_v_head_num_, self.head_dim_)
 
         # post cache_kv
-        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_k
-        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_v
+        infer_state.req_manager.fill_kv_cache(self.layer_num_, cache_k, cache_v, infer_state)
+        # infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_k
+        # infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_v
 
         return q, cache_k, cache_v
 
@@ -180,14 +181,13 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
 
         q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
 
-        batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
+        batch, num_head, head_dim = infer_state.b_start_loc.shape[0], self.tp_q_head_num_, self.head_dim_
         seqlen = infer_state.b_seq_len
 
         out = self.opt_ascend_prompt_attention_inference(q.view(batch, -1, num_head * head_dim), 
-                                                            k.view(batch, -1, num_head * head_dim), 
-                                                            v.view(batch, -1, num_head * head_dim), 
-                                                            seqlen, 32, 128)
-                                                            # seqlen, num_head, head_dim)
+                                                            k.view(batch, -1, self.tp_k_head_num_ * head_dim), 
+                                                            v.view(batch, -1, self.tp_v_head_num_ * head_dim), 
+                                                            seqlen, num_head, head_dim)
 
         out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
 
@@ -222,7 +222,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def token_post_process(self, o, input_embding, infer_state: LlamaInferStateInfo, layer_weight, default_pg):
         # get_o
-        o = torch.mm(o.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+        # o = torch.mm(o.view(-1, self.tp_o_head_num_ * self.head_dim_), layer_weight.o_weight_)
+        o = torch.mm(o, layer_weight.o_weight_)
         if self.world_size_ > 1:
             o = funcol.all_reduce(o, "sum", default_pg)
 
@@ -251,8 +252,22 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     def full_token_attention(self, input_embding, infer_state: LlamaInferStateInfo, layer_weight, current_len, max_seq_length, default_pg=None):
         q = self.opt_token_pre_process(
             input_embding, infer_state, layer_weight)
-        o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_), infer_state.mem_manager.key_buffer[
-                                                   self.layer_num_], infer_state.mem_manager.value_buffer[self.layer_num_], infer_state.int_index_list_t, max_seq_length)  # max_seq_length 5 * 1024
+        # o = self.opt_ascend_incre_attention_kernel(q.view(-1, self.tp_q_head_num_, self.head_dim_),
+        #                                            infer_state.mem_manager.key_buffer[self.layer_num_],
+        #                                            infer_state.mem_manager.value_buffer[self.layer_num_],
+        #                                            infer_state.int_index_list_t,
+        #                                            max_seq_length)  # max_seq_length 5 * 1024
+        # print('####')
+        # import pdb;pdb.set_trace()
+        o = torch.ops.lightllm.paged_attention_inference.default(q.view(-1, self.tp_q_head_num_ * self.head_dim_),
+                                                   infer_state.mem_manager.key_buffer[self.layer_num_].view(-1, self.tp_k_head_num_ * self.head_dim_),
+                                                   infer_state.mem_manager.value_buffer[self.layer_num_].view(-1, self.tp_v_head_num_ * self.head_dim_),
+                                                   self.tp_q_head_num_,
+                                                   self.head_dim_,
+                                                   self.tp_k_head_num_,
+                                                   infer_state.block_table,
+                                                   infer_state.b_seq_len.to(torch.int64),
+                                                   PagingRequestManager.BLOCK_SIZE)
         out = self.opt_token_post_process(
             o, input_embding, infer_state, layer_weight, default_pg)
         return out
