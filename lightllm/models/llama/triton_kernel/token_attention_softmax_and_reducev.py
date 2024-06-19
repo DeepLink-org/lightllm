@@ -4,20 +4,20 @@ from torch.profiler import record_function
 def step0(Req_to_tokens, B_req_idx):
     b_loc = Req_to_tokens[B_req_idx]
     return b_loc
-opt_step0 = torch.compile(step0, backend='ascendgraph', dynamic=False)
+opt_step0 = torch.compile(step0, backend='ascendgraph', dynamic=True)
 
 def step1(b_seq_len, max_input_len, current_arange):
     k_loc_index = max_input_len - b_seq_len + current_arange
     return k_loc_index
-opt_step1 = torch.compile(step1, backend='ascendgraph', dynamic=False)
+opt_step1 = torch.compile(step1, backend='ascendgraph', dynamic=True)
 
 def step2(x):
     return x.softmax(-1)
-opt_step2 = torch.compile(step2, backend='ascendgraph', dynamic=False)
+opt_step2 = torch.compile(step2, backend='ascendgraph', dynamic=True)
 
 def step3(P, V):
     return torch.matmul(P, V)
-opt_step3 = torch.compile(step3, backend='ascendgraph', dynamic=False)
+opt_step3 = torch.compile(step3, backend='ascendgraph', dynamic=True)
 
 @record_function('_token_softmax_reducev_entrypoint')
 def _token_softmax_reducev(logics, v, out, is_padding, masks, req_to_tokens, b_req_idx, b_start_loc, b_seq_len, max_input_len, other_kv_index):

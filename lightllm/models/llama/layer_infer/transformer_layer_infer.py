@@ -122,7 +122,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     def ascend_prompt_attention_kernel(self, q, k, v, seqlen, num_head, head_dim, numKeyValueHeads):
         # import pdb; pdb.set_trace()
         return torch.ops.lightllm.prompt_attention_inference.default(q, k, v, seqlen, num_head, head_dim, numKeyValueHeads)
-    
+
     def ascend_incre_attention_kernel(self, q, k, v, int_index_list, max_seq_length):
         return torch.ops.lightllm.flash_attention_inference.default(q, k, v, int_index_list, max_seq_length)
 
@@ -146,14 +146,17 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         # post cache_kv
         # infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_k
         # infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_v
-        start_index = 0
-        for i in range(infer_state.batch_size):
-            end_index = start_index + infer_state.b_seq_len_list[i]
-            mem_start = infer_state.req_to_token_indexs_list[i][0]
-            mem_end =  mem_start + infer_state.b_seq_len_list[i]
-            infer_state.mem_manager.key_buffer[self.layer_num_][mem_start:mem_end] = cache_k[start_index:end_index]
-            infer_state.mem_manager.value_buffer[self.layer_num_][mem_start:mem_end] = cache_v[start_index:end_index]
-            start_index = end_index
+        # start_index = 0
+        # for i in range(infer_state.batch_size):
+        #     end_index = start_index + infer_state.b_seq_len_list[i]
+        #     mem_start = infer_state.req_to_token_indexs_list[i][0]
+        #     mem_end =  mem_start + infer_state.b_seq_len_list[i]
+        #     infer_state.mem_manager.key_buffer[self.layer_num_][mem_start:mem_end] = cache_k[start_index:end_index]
+        #     infer_state.mem_manager.value_buffer[self.layer_num_][mem_start:mem_end] = cache_v[start_index:end_index]
+        #     start_index = end_index
+
+        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.test_index] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.test_index] = cache_v
 
         return q, cache_k, cache_v
 
@@ -230,11 +233,14 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         # end_index = infer_state.int_index_list[0] + cache_k.shape[0]
         # infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k
         # infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v
-        for i in range(infer_state.batch_size):
-            start_index = infer_state.int_index_list[i]
-            end_index = start_index + cache_k.shape[0]
-            infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k[i]
-            infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v[i]
+        # for i in range(infer_state.batch_size):
+        #     start_index = infer_state.int_index_list[i]
+        #     end_index = start_index + cache_k.shape[0]
+        #     infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k[i]
+        #     infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v[i]
+
+        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.test_index] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.test_index] = cache_v
 
         return q
     

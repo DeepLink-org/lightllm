@@ -350,9 +350,9 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding
     return output
 
 
-# compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
+# compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=True)
 
-compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=False)
+compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=True)
 
 @record_function('eager_context_attention_kernel')
 def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks, is_padding):

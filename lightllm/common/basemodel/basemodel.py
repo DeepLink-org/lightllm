@@ -203,6 +203,12 @@ class TpPartBaseModel:
         infer_state.req_to_token_indexs_list = self.req_manager.req_to_token_indexs.tolist()
         infer_state.b_seq_len_list = infer_state.b_seq_len.tolist()
 
+        test_index = torch.tensor([], dtype=torch.int32, device="cuda")
+        for i in range(infer_state.batch_size):
+            i_index = torch.arange(infer_state.req_to_token_indexs_list[i][0], infer_state.req_to_token_indexs_list[i][0] + infer_state.b_seq_len_list[i], dtype=torch.int32, device="cuda")
+            test_index = torch.cat((test_index, i_index))
+        infer_state.test_index = test_index
+
         default_pg = None
         if self.world_size_ > 1:
             default_pg = dist.distributed_c10d._get_default_group()
@@ -232,8 +238,15 @@ class TpPartBaseModel:
 
         infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
 
-        infer_state.int_index_list = infer_state.mem_index.tolist()
-        infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
+        infer_state.int_index_list = infer_state.mem_index
+        tmp_list = infer_state.mem_index.tolist()
+        infer_state.int_index_list_t = [x + 1 for x in tmp_list]
+
+        test_index = torch.tensor([], dtype=torch.int32, device="cuda")
+        for i in range(infer_state.batch_size):
+            i_index = torch.arange(tmp_list[i], tmp_list[i] + 1, dtype=torch.int32, device="cuda")
+            test_index = torch.cat((test_index, i_index))
+        infer_state.test_index = test_index
 
         infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
         default_pg = None
