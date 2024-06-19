@@ -19,6 +19,10 @@ def matmul_all_reduce(out, x1, x2, bias, group):
     print("running matmul_all_reduce")
     return
 
+def matmul_all_reduce_add_rms_norm(out, x1, x2, residual, bias, gamma, eps, group):
+    print("running matmul_all_reduce_add_rms_norm")
+    return
+
 def ext_paged_attention(q: Tensor, k_cache: Tensor, v_cache: Tensor, current_lens, block_table: Tensor, block_size: int, head, kv_head, dim):
     # numKeyValueHeads = k_cache.shape[1]
     # assert k_cache.shape[1] == v_cache.shape[1]

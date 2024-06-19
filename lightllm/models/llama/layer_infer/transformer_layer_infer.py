@@ -9,7 +9,7 @@ from functools import partial
 from lightllm.common.paging.paging_request_manager import PagingRequestManager
 from lightllm.models.llama.layer_weights.transformer_layer_weight import LlamaTransformerLayerWeight
 from lightllm.models.llama.triton_kernel.context_flashattention_nopad import context_attention_fwd, prompt_flash_attention
-from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import paged_token_attention, matmul_all_reduce
+from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import paged_token_attention, matmul_all_reduce, matmul_all_reduce_add_rms_norm
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_softmax import token_softmax_fwd
 # from lightllm.models.llama.triton_kernel.token_attention_nopad_reduceV import token_att_fwd2, token_att_fwd2_int8v
 from lightllm.models.llama.triton_kernel.rmsnorm import rms_norm, rmsnorm_forward
@@ -240,7 +240,12 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                                     mem_manager.value_buffer[self.layer_num_],
                                     mem_manager.value_scale_buffer[self.layer_num_])
         return
-    
+
+    def _matmul_all_reduce_add_rms_norm(self, input_embdings, o, infer_state:LlamaInferStateInfo, layer_weight):
+        out = infer_state.matmul_all_reduce_add_rms_norm_out
+        matmul_all_reduce_add_rms_norm(out, input_embdings, o, layer_weight.o_weight_, input_embdings, None, layer_weight.ffn_norm_weight_, self.eps_, self.pg_comm_name)
+        return out
+
     @torch.profiler.record_function('token attn')
     def _token_decode_attention_normal(self, q, infer_state: LlamaInferStateInfo, layer_weight, out=None):
         o_tensor = infer_state.attention_out if out is None else out

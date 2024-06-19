@@ -1,5 +1,7 @@
 import torch
 import torch.distributed as dist
+
+from lightllm.models.llama.triton_kernel.token_attention_nopad_att1 import matmul_all_reduce, matmul_all_reduce_add_rms_norm
 from ..transformer_layer_infer import TransformerLayerInfer
 from ...infer_struct import InferStateInfo
 from ...splitfuse_infer_struct import SplitFuseInferStateInfo
@@ -139,21 +141,51 @@ class TransformerLayerInferTpl(TransformerLayerInfer):
             dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
         input_embdings.add_(ffn_out.view(-1, self.embed_dim_))
         return
-    
+
+    def _matmul_all_reduce_add_rms_norm(self, input_embdings, o, infer_state, layer_weight):
+        print("use original matmul_all_reduce_add_rms_norm")
+        o = self._get_o(o, infer_state, layer_weight)
+        input_embdings.add_(o)
+        input1 = self._ffn_norm(input_embdings, infer_state, layer_weight)
+        return input1
+
     @torch.profiler.record_function('context forward')
     def context_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
-        self._context_attention(input_embdings,
-                                      infer_state,
-                                      layer_weight=layer_weight)
-        self._context_ffn(input_embdings, infer_state, layer_weight)
+        # self._context_attention(input_embdings,
+        #                               infer_state,
+        #                               layer_weight=layer_weight)
+        # self._context_ffn(input_embdings, infer_state, layer_weight)
+        input1 = self._att_norm(input_embdings, infer_state, layer_weight)
+        cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
+        q, cache_k, cache_v  = self._get_qkv(input1, cache_k, cache_v, infer_state, layer_weight)
+        input1 = None
+        self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
+        o = self._context_attention_kernel(q, cache_k, cache_v, infer_state, layer_weight)
+        q = None
+        input1 = self._matmul_all_reduce_add_rms_norm(input_embdings, o, infer_state, layer_weight)
+        ffn_out = self._ffn(input1, infer_state, layer_weight)
+        input_embdings.add_(ffn_out)
         return input_embdings
 
     @torch.profiler.record_function('token forward')
     def token_forward(self, input_embdings, infer_state: InferStateInfo, layer_weight):
-        self._token_attention(input_embdings,
-                                    infer_state,
-                                    layer_weight=layer_weight)
-        self._token_ffn(input_embdings, infer_state, layer_weight)
+        # self._token_attention(input_embdings,
+        #                             infer_state,
+        #                             layer_weight=layer_weight)
+        # self._token_ffn(input_embdings, infer_state, layer_weight)
+        input1 = self._att_norm(input_embdings, infer_state, layer_weight)
+        cache_k, cache_v = self._pre_cache_kv(infer_state, layer_weight)
+        q, cache_k, cache_v = self._get_qkv(input1, cache_k, cache_v, infer_state, layer_weight)
+        input1 = None
+        self._post_cache_kv(cache_k, cache_v, infer_state, layer_weight)
+        o = self._token_attention_kernel(q, infer_state, layer_weight)
+        q = None
+        input1 = self._matmul_all_reduce_add_rms_norm(input_embdings, o, infer_state, layer_weight)
+        ffn_out = self._ffn(input1, infer_state, layer_weight)
+        # input1 = None
+        # if self.world_size_ > 1:
+        #     dist.all_reduce(ffn_out, op=dist.ReduceOp.SUM, async_op=False)
+        input_embdings.add_(ffn_out)
         return input_embdings
     
     def splitfuse_forward(self, input_embdings, infer_state: SplitFuseInferStateInfo, layer_weight):

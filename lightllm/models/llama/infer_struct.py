@@ -40,6 +40,7 @@ class LlamaInferStateInfo(InferStateInfo):
 
         self.rms_norm_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
         self.matmul_all_reduce_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
+        self.matmul_all_reduce_add_rms_norm_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
         self.ffn1_out = torch.empty([token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
         self.ffn2_out = torch.empty([token_num, self.embed_dim], dtype=torch.float16, device='cuda')
         self.gate_out = torch.empty([token_num, self.layer0_weight.up_proj.shape[1]], dtype=torch.float16, device='cuda')
