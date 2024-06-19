@@ -454,5 +454,7 @@ def main():
 
 
 if __name__ == "__main__":
+    import gc
+    gc.disable()
     torch.multiprocessing.set_start_method('spawn'), # this code will not be ok for settings to fork to subprocess
     main()

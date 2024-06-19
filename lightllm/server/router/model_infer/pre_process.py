@@ -51,15 +51,19 @@ def prepare_prefill_inputs(batch:InferBatch, is_multimodal=False):
         nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
 
+        masks = []
+        is_padding = False
         kwargs = {
             "batch_size": len(batch),
             "total_token_num": nopad_total_token_num,
             "max_len_in_batch": nopad_max_len_in_batch,
             "input_ids": input_ids,
+            "masks": masks,
+            "is_padding": is_padding,
             "b_req_idx": nopad_b_req_idx,
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,
-            "is_prefill": True,
+            "is_prefill": True
         }
         if is_multimodal:
             kwargs["multimodal_params"] = batch_multimodal_params
@@ -99,15 +103,19 @@ def prepare_decode_inputs(batch:InferBatch):
         nopad_b_start_loc = torch.tensor(nopad_b_start_loc, dtype=torch.int32, device='cuda')
         nopad_b_seq_len = torch.tensor(nopad_b_seq_len, dtype=torch.int32, device='cuda')
 
+        masks = []
+        is_padding = False
         kwargs = {
             "batch_size": len(batch),
             "total_token_num": nopad_total_token_num,
             "max_len_in_batch": nopad_max_len_in_batch,
             "input_ids": input_ids,
+            "masks": masks,
+            "is_padding": is_padding,
             "b_req_idx": nopad_b_req_idx,
             "b_start_loc": nopad_b_start_loc,
             "b_seq_len": nopad_b_seq_len,
-            "is_prefill": False            
+            "is_prefill": False
         }
         return kwargs, run_reqs, not_run_reqs
     else:
