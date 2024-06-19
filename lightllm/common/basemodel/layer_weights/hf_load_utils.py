@@ -23,7 +23,7 @@ def load_func(file_, use_safetensors=False, pre_post_layer=None, transformer_lay
         for layer in transformer_layer_list:
             layer.load_hf_weights(weights)
     del weights
-    gc.collect()
+    # gc.collect()
 
 
 def load_hf_weights(data_type, weight_dir, pre_post_layer=None, transformer_layer_list=None, weight_dict=None):

@@ -42,7 +42,7 @@ def load_ds_weights(data_type, weight_dir, pre_post_layer=None, transformer_laye
         for layer in transformer_layer_list:
             layer.load_hf_weights(weights_all)
     del weights_all
-    gc.collect()
+    # gc.collect()
     return
 
 if __name__ == '__main__':

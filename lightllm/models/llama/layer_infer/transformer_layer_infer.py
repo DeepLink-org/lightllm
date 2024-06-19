@@ -1,4 +1,5 @@
 import torch
+import torch_dipu
 import torch.functional as F
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
@@ -119,11 +120,22 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         out = torch.ops.lightllm.rotary_emb.default(x, cos, sin)
         return out
     
-    def ascend_prompt_attention_kernel(self, q, k, v, seqlen, num_head , head_dim):
-        return torch.ops.lightllm.prompt_attention_inference.default(q, k, v, seqlen, num_head, head_dim)
+    def ascend_prompt_attention_kernel(self, q, k, v, seqlen, num_head , head_dim, numKeyValueHeads):
+        return torch.ops.lightllm.prompt_attention_inference.default(q, k, v, seqlen, num_head, head_dim, numKeyValueHeads)
     
-    def ascend_incre_attention_kernel(self, q, k, v, int_index_list, max_seq_length):
-        return torch.ops.lightllm.flash_attention_inference.default(q, k, v, int_index_list, max_seq_length)
+    def ascend_incre_attention_kernel(self, q, k, v, int_index_list_t, max_seq_length):
+        return torch.ops.lightllm.flash_attention_inference.default(q, k, v, int_index_list_t, max_seq_length)
+
+    def dump_tensor(self, x, name):
+        import pickle
+        if torch_dipu.current_device() != 0:
+            return
+        with open(f'/data2/zhoushenglong/tmp/{name}.pkl', 'wb') as f:
+            if isinstance(x, torch.Tensor):
+                pickle.dump(x.cpu(), f)
+            else:
+                pickle.dump(x, f)
+        return
 
     def context_pre_process(self, input_embdings, infer_state, layer_weight):
         # att_norm
@@ -143,8 +155,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         cache_v = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.v_weight_).view(-1, self.tp_v_head_num_, self.head_dim_)
 
         # post cache_kv
-        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_k
-        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.mem_start:infer_state.mem_end] = cache_v
+        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.test_index] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.test_index] = cache_v
 
         return q, cache_k, cache_v
 
@@ -179,14 +191,17 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         q, k, v = self.opt_context_pre_process(input_embding, infer_state, layer_weight)
 
         q = q.view(-1, self.tp_q_head_num_, self.head_dim_)
+        k = k.view(-1, self.tp_k_head_num_, self.head_dim_)
+        v = v.view(-1, self.tp_v_head_num_, self.head_dim_)
 
         batch, num_head, head_dim = infer_state.b_start_loc.shape[0], q.shape[1], q.shape[2]
         seqlen = infer_state.b_seq_len
+        numKeyValueHeads = k.shape[1]
 
         out = self.opt_ascend_prompt_attention_inference(q.view(batch, -1, num_head * head_dim), 
-                                                            k.view(batch, -1, num_head * head_dim), 
-                                                            v.view(batch, -1, num_head * head_dim), 
-                                                            seqlen, num_head, head_dim)
+                                                         k.view(batch, -1, numKeyValueHeads * head_dim),
+                                                         v.view(batch, -1, numKeyValueHeads * head_dim),
+                                                         seqlen, num_head, head_dim, numKeyValueHeads)
 
         out = out.view(-1, self.tp_q_head_num_ * self.head_dim_)
 
@@ -212,10 +227,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         cache_v = cache_v.view(-1, self.tp_v_head_num_, self.head_dim_)
 
         # post cache_kv
-        start_index = infer_state.int_index_list[0]
-        end_index = infer_state.int_index_list[0] + 1
-        infer_state.mem_manager.key_buffer[self.layer_num_][start_index:end_index] = cache_k
-        infer_state.mem_manager.value_buffer[self.layer_num_][start_index:end_index] = cache_v
+        infer_state.mem_manager.key_buffer[self.layer_num_][infer_state.test_index] = cache_k
+        infer_state.mem_manager.value_buffer[self.layer_num_][infer_state.test_index] = cache_v
 
         return q
     
@@ -229,11 +242,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         
         # ffn_norm
         input1 = torch.ops.lightllm.rms_norm.default(input_embding.float(), layer_weight.ffn_norm_weight_.float(), self.eps_).half()
+
+        # tmp_res = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_up_proj )
+        # (gate_out, up_out) = torch.ops.aten.split(tmp_res, layer_weight.gate_up_proj.size()[1] // 2, dim=1)
         
-        tmp_res = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_up_proj )
-        (gate_out, up_out) = torch.ops.aten.split(tmp_res, layer_weight.gate_up_proj.size()[1] // 2, dim=1)
-        
-        gate_out = torch.nn.functional.silu(gate_out)
+        # gate_out = torch.nn.functional.silu(gate_out)
+
+        gate_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.gate_proj)
+        torch.nn.functional.silu(gate_out, inplace=True)
+        up_out = torch.mm(input1.view(-1, self.embed_dim_), layer_weight.up_proj)
 
         input1 = None
         ffn1_out = gate_out * up_out
