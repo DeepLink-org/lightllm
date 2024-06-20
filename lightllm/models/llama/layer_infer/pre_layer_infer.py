@@ -21,6 +21,9 @@ class LlamaPreLayerInfer(PreLayerInferTpl):
         self.vob_start_id_ = tp_vocab_size_ * self.tp_rank_
         self.vob_end_id_ = tp_vocab_size_ * (self.tp_rank_ + 1)
 
+        self.opt_context_forward = torch.compile(self.context_forward, backend='ascendgraph', dynamic=True)
+        self.opt_token_forward = torch.compile(self.token_forward, backend='ascendgraph', dynamic=True)
+
         return
 
     def pre_context_forward(self, input_ids, layer_weight, default_pg):
