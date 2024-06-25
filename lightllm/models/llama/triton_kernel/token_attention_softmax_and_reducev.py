@@ -20,7 +20,7 @@ def step3(P, V):
 opt_step3 = torch.compile(step3, backend='ascendgraph', dynamic=False)
 
 @record_function('_token_softmax_reducev_entrypoint')
-def _token_softmax_reducev(logics, v, out, is_padding, masks, req_to_tokens, b_req_idx, b_start_loc, b_seq_len, max_input_len, other_kv_index):
+def _token_softmax_reducev(logics, v, out, req_to_tokens, b_req_idx, b_start_loc, b_seq_len, max_input_len, other_kv_index):
     with record_function('opt_step0'):
         b_loc = opt_step0(req_to_tokens, b_req_idx)
     batch, head, dim = b_loc.shape[0], v.shape[1], v.shape[2]
@@ -30,8 +30,6 @@ def _token_softmax_reducev(logics, v, out, is_padding, masks, req_to_tokens, b_r
             v_loc_index = opt_step1(b_seq_len[i], max_input_len, current_arange)
         v_loc = b_loc[i][v_loc_index]
         P = logics[:, b_start_loc[i]:b_start_loc[i] + b_seq_len[i]]
-        if is_padding:
-            P = P + masks[i]
         with record_function('opt_step2'):
             P = opt_step2(P)
         P = P.reshape(head, 1, 1, b_seq_len[i]).transpose(0, 1)

@@ -11,9 +11,7 @@ class LlamaInferStateInfo(InferStateInfo):
         self.other_kv_index = None
         self.masks = None
 
-    def init_some_extra_state(self, model, input_ids : torch.Tensor, masks: torch.Tensor, is_padding: bool):
-        self.masks = masks
-        self.is_padding = is_padding
+    def init_some_extra_state(self, model, input_ids: torch.Tensor):
         if self.is_prefill:
             b_seq_len_numpy = self.b_seq_len.cpu().numpy()
             position_ids = torch.from_numpy(np.concatenate([np.arange(0, b_seq_len_numpy[i])

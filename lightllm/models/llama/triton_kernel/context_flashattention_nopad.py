@@ -317,7 +317,7 @@ from torch.profiler import record_function
 #     assert torch.allclose(torch_out, o, atol=1e-2, rtol=0)
 
 import torch.nn.functional as F
-def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding_mask, is_padding):
+def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim):
     pass
     def dump_tensor(x, name):
         import pickle
@@ -336,8 +336,6 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding
     # print(padding_mask[0])
     # print(mask.shape, flush=True)
     # print(padding_mask.shape, flush=True)
-    if is_padding:
-        mask = padding_mask
     keys = xk
     values = xv
     xq = xq.transpose(1, 2)
@@ -355,14 +353,14 @@ def _torch_context_attention(xq, xk, xv, bs, seqlen, num_head, head_dim, padding
 compiled_context_attention = torch.compile(_torch_context_attention, backend='ascendgraph', dynamic=True)
 
 @record_function('eager_context_attention_kernel')
-def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len, masks, is_padding):
+def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len):
     batch, head, dim = b_start_loc.shape[0], q.shape[1], q.shape[2]
 
     for i in range(batch):
         start = b_start_loc[i]
         end = start + b_seq_len[i]
         with record_function('compiled_torch_context_attention'):
-            out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim, masks[i], is_padding)
+            out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim)
     return out
 
 context_attention_fwd = context_attention
