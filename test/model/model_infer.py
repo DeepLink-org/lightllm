@@ -58,39 +58,21 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     torch.cuda.set_device(rank_id)
     print(f"set device: {rank_id}", flush=True)
     
-    import torch.distributed as dist
-    
     dist.barrier()
     torch.cuda.empty_cache()
     gc.disable()
-    print('################### 1')
-    model_part = model_class(model_kvargs)
-    print('################### 2')
 
-    if is_padding:
-        total_len = min(model_kvargs["max_seq_length"], max_prompt_size + output_len)
-    else:
-        total_len = min(model_kvargs["max_seq_length"], input_len + output_len)
+    import time
+    time_start = time.time()
+    print("loading model......")
+    model_part = model_class(model_kvargs)
+    print(f"loading model completed, it takes {int(time.time() - time_start)}s.")
+
+    total_len = min(model_kvargs["max_seq_length"], input_len + output_len)
 
     # warm up
-    if is_padding:
-        tmp_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
-        tmp_data = torch.from_numpy(tmp_data).cuda()
-
-        test_data = np.vstack([np.arange(5, max_prompt_size + 5) for _ in range(batch_size)])
-        test_data = torch.from_numpy(test_data).cuda()
-
-        left_pad_size_list = []
-        for k, t in enumerate(tmp_data):
-            left_pad_size = max_prompt_size - len(t)
-            left_pad_size_list.append(left_pad_size)
-            test_data[k, left_pad_size:] = torch.tensor(t).long()
-            if left_pad_size > 0:
-                test_data[k, 0: left_pad_size] = torch.full((1, left_pad_size), 0).cuda().long()
-    else:
-        left_pad_size_list = torch.full((batch_size, ), 0)
-        test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
-        test_data = torch.from_numpy(test_data).cuda()
+    test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
+    test_data = torch.from_numpy(test_data).cuda()
 
     test_data = test_data.reshape(-1)
 
@@ -99,45 +81,34 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
 
     for i in range(batch_size):
-        if is_padding:
-            b_start_loc[i] = i * max_prompt_size
-            b_seq_len[i] = max_prompt_size
-        else:
-            b_start_loc[i] = i * input_len
-            b_seq_len[i] = input_len
+        b_start_loc[i] = i * input_len
+        b_seq_len[i] = input_len
 
-    if is_padding:
-        start_pos = max_prompt_size
-    else:
-        start_pos = input_len
+    start_pos = input_len
     prev_pos = 0
 
     for cur_pos in range(start_pos, total_len + 1):
         seqlen = cur_pos - prev_pos
         if seqlen > 1:
-            masks = []
-
             total_token_num = seqlen * batch_size
-
             logics = model_part.forward(batch_size,
                                         total_token_num,
                                         model_kvargs["max_seq_length"], #seqlen,
                                         test_data,
-                                        masks,
-                                        is_padding,
                                         b_req_idx,
                                         b_start_loc,
                                         b_seq_len,
                                         is_prefill=True)
-
+            # torch.cuda.synchronize()
+            # current_stream = torch_dipu.current_stream(rank_id).dipu_stream
+            # acl.rt.synchronize_stream(current_stream)
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
             print(logics, flush=True)
-            print(f"Success_prefill: {predict_ids}.", flush=True)
+            print(f"Success_prefill1: {predict_ids}.", flush=True)
+            # break
         else:
-            masks = []
-
             b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
             total_token_num += batch_size
             b_seq_len += 1
@@ -145,8 +116,6 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
                                         total_token_num,
                                         model_kvargs["max_seq_length"], # cur_pos,
                                         torch.from_numpy(predict_ids).cuda().reshape(-1),
-                                        masks,
-                                        is_padding,
                                         b_req_idx,
                                         b_start_loc,
                                         b_seq_len,
@@ -155,118 +124,110 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
+            print(f"decode_{cur_pos - start_pos}done.", flush=True)
         prev_pos = cur_pos
-        print(logics, flush=True)
-        print(f"Success: {predict_ids}.", flush=True)
+    print(logics, flush=True)
+    print(f"Success1: {predict_ids}.", flush=True)
+    # ans_queue.put(True)
+    return
 
-    # model_part.mem_manager.free_all()
-    # model_part.req_manager.free_all()
+    model_part.mem_manager.free_all()
+    model_part.req_manager.free_all()
 
-    # if rank_id == 0:
-    #     print("can use mem size:", model_part.mem_manager.can_use_mem_size)
-    #     print("can use req size:", model_part.req_manager.can_use_req_size)
+    if rank_id == 0:
+        print("can use mem size:", model_part.mem_manager.can_use_mem_size)
+        print("can use req size:", model_part.req_manager.can_use_req_size)
 
-    # b_req_idx = None
-    # b_start_loc = None
-    # b_seq_len = None
+    b_req_idx = None
+    b_start_loc = None
+    b_seq_len = None
 
-    # dist.barrier()
-    # torch.cuda.synchronize()
-    # import time
-    # start_time = time.time()
+    dist.barrier()
+    torch.cuda.synchronize()
+    import time
+    start_time = time.time()
 
-    # b_req_idx = model_part.req_manager.alloc(batch_size).int()
-    # b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
-    # b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
+    b_req_idx = model_part.req_manager.alloc(batch_size).int()
+    b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
+    b_seq_len = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
 
-    # for i in range(batch_size):
-    #     if is_padding:
-    #         b_start_loc[i] = i * max_prompt_size
-    #         b_seq_len[i] = max_prompt_size
-    #     else:
-    #         b_start_loc[i] = i * input_len
-    #         b_seq_len[i] = input_len
+    for i in range(batch_size):
+        b_start_loc[i] = i * input_len
+        b_seq_len[i] = input_len
 
-    # if is_padding:
-    #     start_pos = max_prompt_size
-    # else:
-    #     start_pos = input_len
-    # prev_pos = 0
+    start_pos = input_len
+    prev_pos = 0
 
-    # for cur_pos in range(start_pos, total_len + 1):
-    #     seqlen = cur_pos - prev_pos
-    #     if seqlen > 1:
-    #         masks = []
+    # with torch.autograd.profiler.profile(with_modules=True) as prof:
+    with torch_dipu.profiler.NativeProfile('/data2/zhoushenglong/compile_dev_dynamic/lightllm', with_stack=False):
+        for cur_pos in range(start_pos, total_len + 1):
+            seqlen = cur_pos - prev_pos
+            if seqlen > 1:
+                total_token_num = seqlen * batch_size
+                # prefill_start_time = time.time()
+                # path = "/data2/zhoushenglong/lightllm/"
+                # with torch_dipu.profiler.NativeProfile(path, with_stack=False):
+                # with torch.autograd.profiler.profile(with_stack=True, with_modules=True) as prof:
+                with record_function("prefill_forward"):
+                    logics = model_part.forward(batch_size,
+                                                total_token_num,
+                                                model_kvargs["max_seq_length"], #seqlen,
+                                                test_data,
+                                                b_req_idx,
+                                                b_start_loc,
+                                                b_seq_len,
+                                                is_prefill=True)
+                # output_path = "/data2/zhoushenglong/torch_profile_prefill_t"
+                # prof.export_chrome_trace(output_path)
 
-    #         total_token_num = seqlen * batch_size
+                torch.cuda.synchronize()
+                # current_stream = torch_dipu.current_stream(rank_id).dipu_stream
+                # acl.rt.synchronize_stream(current_stream)
+                prob_out = torch.softmax(logics, dim=-1)
+                predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
+                predict_ids = predict_ids.detach().cpu().numpy()
+                print(logics, flush=True)
+                print(f"Success_prefill2: {predict_ids}.", flush=True)
+                # break
+            else:
+                # step_start = time.time()
+                b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
+                total_token_num += batch_size
+                b_seq_len += 1
+                # with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True, with_modules=True) as prof:
+                # with torch.autograd.profiler.profile(with_modules=True) as prof:
+                with record_function("decode_forward"):
+                    logics = model_part.forward(batch_size,
+                                                total_token_num,
+                                                model_kvargs["max_seq_length"], # cur_pos,
+                                                torch.from_numpy(predict_ids).cuda().reshape(-1),
+                                                b_req_idx,
+                                                b_start_loc,
+                                                b_seq_len,
+                                                is_prefill=False)
+                # output_path = f"/data2/zhoushenglong/torch_profile_decode_{str(cur_pos - start_pos)}_t"
+                # prof.export_chrome_trace(output_path)
 
-    #         prefill_start_time = time.time()
-    #         # path = "/data2/zhoushenglong/lightllm/"
-    #         # with torch_dipu.profiler.NativeProfile(path, with_stack=False):
-    #         with torch.autograd.profiler.profile(with_stack=True, with_modules=True) as prof:
-    #             logics = model_part.forward(batch_size,
-    #                                         total_token_num,
-    #                                         seqlen,
-    #                                         test_data,
-    #                                         masks,
-    #                                         is_padding,
-    #                                         b_req_idx,
-    #                                         b_start_loc,
-    #                                         b_seq_len,
-    #                                         is_prefill=True)
-    #         output_path = "/data2/zhoushenglong/torch_profile_prefill_t"
-    #         prof.export_chrome_trace(output_path)
+                torch.cuda.synchronize()
+                # current_stream = torch_dipu.current_stream(rank_id).dipu_stream
+                # acl.rt.synchronize_stream(current_stream)
 
-    #         torch.cuda.synchronize()
-    #         if rank_id == 0:
-    #             print("prefill time cost(ms):", (time.time() - prefill_start_time) * 1000)
+                prob_out = torch.softmax(logics, dim=-1)
+                predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
+                predict_ids = predict_ids.detach().cpu().numpy()
+                print(f"decode_{cur_pos - start_pos}done.", flush=True)
+            prev_pos = cur_pos
+    # output_path = f"/data2/zhoushenglong/compile_dev/torch_profiler_test"
+    # prof.export_chrome_trace(output_path)
 
-    #         prob_out = torch.softmax(logics, dim=-1)
-    #         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
-    #         predict_ids = predict_ids.detach().cpu().numpy()
+    torch.cuda.synchronize()
+    end_time = time.time()
 
-    #     else:
-    #         torch.cuda.synchronize()
-    #         step_start = time.time()
-
-    #         masks = []
-
-    #         b_start_loc = b_start_loc + torch.arange(0, batch_size, dtype=torch.int32, device="cuda")
-    #         total_token_num += batch_size
-    #         b_seq_len += 1
-
-    #         if True:
-    #         # if False:
-    #         # if cur_pos == start_pos + 1:
-    #             # path = "/data2/zhoushenglong/lightllm/"
-    #             # with torch_dipu.profiler.NativeProfile(path, with_stack=False):
-    #             with torch.autograd.profiler.profile(with_stack=True, with_modules=True) as prof:
-    #                 logics = model_part.forward(batch_size, total_token_num, cur_pos, torch.from_numpy(
-    #                     predict_ids).cuda().reshape(-1), masks, is_padding, b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
-    #             output_path = f"/data2/zhoushenglong/torch_profile_decode_{str(cur_pos - start_pos)}_t"
-    #             prof.export_chrome_trace(output_path)
-    #         else:
-    #             logics = model_part.forward(batch_size, total_token_num, cur_pos, torch.from_numpy(
-    #                 predict_ids).cuda().reshape(-1), masks, is_padding, b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
-
-    #         prob_out = torch.softmax(logics, dim=-1)
-    #         predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
-    #         predict_ids = predict_ids.detach().cpu().numpy()
-
-    #         torch.cuda.synchronize()
-    #         if cur_pos % 100 == 0 or cur_pos == total_len - 1:
-    #             if rank_id == 0:
-    #                 print(cur_pos, "step cost time(ms):", (time.time() - step_start) * 1000)
-    #     prev_pos = cur_pos
     # print(logics, flush=True)
-    # print(f"Success: {predict_ids}.", flush=True)
+    print(f"Success2: {predict_ids}.", flush=True)
 
-    # torch.cuda.synchronize()
-    # end_time = time.time()
-
-    # if rank_id == 0:
-    #     print("time total cost(ms):", (end_time - start_time) * 1000)
+    if rank_id == 0:
+        print("time total cost(ms):", (end_time - start_time) * 1000)
 
     # ans_queue.put(True)
-
     return
