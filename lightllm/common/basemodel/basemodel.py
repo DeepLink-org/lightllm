@@ -63,7 +63,6 @@ class TpPartBaseModel:
 
         self.opt_context_forward = torch.compile(self._context_forward, backend='ascendgraph', dynamic=self.dynamic)
         self.opt_token_forward = torch.compile(self._token_forward, backend='ascendgraph', dynamic=self.dynamic)
-        self.opt_all_layer_token_forward_with_pre_post_process = torch.compile(self.all_layer_token_forward_with_pre_post_process, backend='ascendgraph', dynamic=self.dynamic)
 
         return
     
@@ -154,8 +153,6 @@ class TpPartBaseModel:
             total_token_num,
             max_len_in_batch,
             input_ids : torch.Tensor,
-            masks : torch.Tensor,
-            is_padding : bool,
             b_req_idx : torch.Tensor,
             b_start_loc : torch.Tensor,
             b_seq_len : torch.Tensor,
@@ -167,13 +164,13 @@ class TpPartBaseModel:
         infer_state.layer0_weight = self.trans_layers_weight[0]
         infer_state.embed_dim = self.embed_dim_
         if is_prefill:
-            predict_logics = self._prefill(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            predict_logics = self._prefill(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
             return predict_logics
         else:
-            return self._decode(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
+            return self._decode(infer_state, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params)
 
     @record_function('_prefill')    
-    def _prefill(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
+    def _prefill(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state.is_prefill = True
         infer_state.return_all_prompt_logprobs = self.return_all_prompt_logprobs
         infer_state.batch_size = batch_size
@@ -193,7 +190,8 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size * max_len_in_batch, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
+
+        infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
         infer_state.kv_start_indices = torch.empty((total_token_num,), dtype = torch.int32, device='cuda')
         kv_start = 0
@@ -219,12 +217,7 @@ class TpPartBaseModel:
         return predict_logics
     
     @record_function('_decode')
-    def _decode(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, masks, is_padding, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
-        print('####: block_size: ', PagingRequestManager.BLOCK_SIZE)
-        print('####: q_head_num: ', self.tp_q_head_num_)
-        print('####: kv_head_num: ', self.tp_k_head_num_)
-        print('####: dim: ', self.head_dim_)
-        print('####: o_head_num: ', self.layers_infer[0].tp_o_head_num_)
+    def _decode(self, infer_state:InferStateInfo, batch_size, total_token_num, max_len_in_batch, input_ids, b_req_idx, b_start_loc, b_seq_len, multimodal_params):
         infer_state.is_prefill = False
         infer_state.batch_size = batch_size
         infer_state.total_token_num = total_token_num
@@ -244,8 +237,8 @@ class TpPartBaseModel:
         infer_state.mem_is_contiguous = False
         infer_state.key_buffer = torch.empty((batch_size, self.tp_k_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
         infer_state.value_buffer = torch.empty((batch_size, self.tp_v_head_num_* self.head_dim_), dtype=torch.float16, device="cuda")
-        # infer_state.mem_index = self.req_manager.mem_index_offset[:batch_size] + b_seq_len - 1
-        infer_state.init_some_extra_state(self, input_ids, masks, is_padding)
+
+        infer_state.init_some_extra_state(self, input_ids)
         infer_state.block_table = self.req_manager.get_batched_block_table(b_req_idx)
         infer_state.block_indices = torch.empty((batch_size,), dtype = torch.int32, device='cuda')
         for b_idx in range(batch_size):
@@ -258,7 +251,6 @@ class TpPartBaseModel:
         infer_state.kv_start_indices = infer_state.block_indices * PagingRequestManager.BLOCK_SIZE + last_block_offsets
         infer_state.int_index_list = infer_state.kv_start_indices.tolist()
         infer_state.int_index_list_t = [x + 1 for x in infer_state.int_index_list]
-        
         
         default_pg = None
         if self.world_size_ > 1:
@@ -346,29 +338,26 @@ class TpPartBaseModel:
         input_embs = self.pre_infer.context_forward(input_ids, infer_state, self.pre_post_weight, default_pg)
         # for i in range(self.layers_num):
         for i in range(1):
-            input_embs = self.layers_infer[i].full_context_attention(input_embs, infer_state, self.trans_layers_weight[i], default_pg)
+            input_embs = self.layers_infer[i].opt_full_context_attention(input_embs, infer_state, self.trans_layers_weight[i], default_pg)
 
         predict_logics = self.post_infer.token_forward(input_embs, infer_state, self.pre_post_weight, default_pg, return_logics=True)
         
         return predict_logics
     
-    def all_layer_token_forward_with_pre_post_process(self, cuda_input_ids, infer_state, current_len, max_seq_length, batch_size, default_pg):
-        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight, default_pg)
-        # for i in range(self.layers_num):
-        for i in range(1):
-            input_embs = self.layers_infer[i].opt_full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], current_len, max_seq_length, default_pg)
-        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, default_pg, return_logics=True)
-        
-        return predict_logics
-
     @record_function('_token_forward')
     @final
     def _token_forward(self, input_ids, infer_state: InferStateInfo, default_pg):
-        with record_function('token_forward_with_pre_post_process'):
-            batch_size = infer_state.batch_size
-            cuda_input_ids = input_ids
-            predict_logics = self.all_layer_token_forward_with_pre_post_process(cuda_input_ids, infer_state, infer_state.int_index_list[0], self.max_seq_length, batch_size, default_pg)
+        batch_size = infer_state.batch_size
+        cuda_input_ids = input_ids
 
+        input_embs = self.pre_infer.token_forward(cuda_input_ids, infer_state, self.pre_post_weight, default_pg)
+
+        # for i in range(self.layers_num):
+        for i in range(1):
+            input_embs = self.layers_infer[i].opt_full_token_attention(input_embs, infer_state, self.trans_layers_weight[i], self.max_seq_length, default_pg)
+
+        predict_logics = self.post_infer.dicp_token_forward(input_embs, infer_state, self.pre_post_weight, batch_size, default_pg, return_logics=True)
+        
         return predict_logics
     
     @final
