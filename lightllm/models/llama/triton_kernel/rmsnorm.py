@@ -65,7 +65,28 @@ import torch
 def torch_rms_norm(x, weight, eps):
     return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * weight
 
-rmsnorm_forward = torch_rms_norm
+# rmsnorm_forward = torch_rms_norm
+
+import deeplink_ext.cpp_extensions as ext
+def rmsnorm_forward(x, weight, eps):
+    normalized_shape = [x.shape[1],]
+    n = len(normalized_shape)
+    inv_rms = torch.empty(
+        list(x.shape[:-n]),
+        dtype=torch.float16,
+        device=x.device,
+    )
+    output = torch.empty_like(x)
+    ext.rms_norm(
+            output,
+            inv_rms,
+            x,
+            normalized_shape,
+            weight,
+            None,
+            eps,
+        )
+    return output
 
 def test_rms_norm(M, N, dtype, eps=1e-5, device='cuda'):
     # create data

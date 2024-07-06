@@ -351,4 +351,39 @@ def context_attention(q, k, v, out, b_start_loc, b_seq_len, max_input_len):
         with record_function('compiled_torch_context_attention'):
             out[start:end, :] = compiled_context_attention(q[start:end], k[start:end], v[start:end], 1, int(b_seq_len[i]), head, dim)
     return out
-context_attention_fwd = context_attention
+# context_attention_fwd = context_attention
+
+import deeplink_ext.cpp_extensions as ext
+def context_attention_fwd(query, key, value, out, b_start_loc, b_seq_len, max_input_len):
+    query = query.view(b_seq_len.numel(), -1, query.shape[1], query.shape[2])
+    key = key.view(b_seq_len.numel(), -1, key.shape[1], key.shape[2])
+    value = value.view(b_seq_len.numel(), -1, value.shape[1], value.shape[2])
+
+    device = query.device
+    gen = torch.Generator(device)
+    batch_size = query.shape[0]
+    seqlen_q = query.shape[1]
+    head_num = query.shape[2]
+
+    softmax_scale = key.shape[-1] ** (-0.5)
+    # out = torch.empty_like(query)
+    softmax_lse = torch.empty(
+        [batch_size, head_num, seqlen_q], dtype=torch.float32, device=device
+    )
+    causal = True
+    dropout_p = 0.0
+    ext.fa_fwd(
+        out,
+        softmax_lse,
+        gen,
+        query,
+        key,
+        value,
+        None,
+        dropout_p,
+        softmax_scale,
+        causal,
+        -1,
+        -1,
+    )
+    return out

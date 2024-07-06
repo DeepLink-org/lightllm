@@ -116,4 +116,26 @@ def torch_rotary_emb(x, cos, sin):
 compiled_torch_rotary_emb = torch_rotary_emb #torch.compile(torch_rotary_emb, backend='ascendgraph', dynamic=False)
 
 
-rotary_emb_fwd = compiled_torch_rotary_emb
+# rotary_emb_fwd = compiled_torch_rotary_emb
+import deeplink_ext.cpp_extensions as ext
+
+def rotary_emb_fwd(x, cos, sin):
+    _, seqlen, _, headdim = x.shape
+    rotary_seqlen, rotary_dim = cos.shape
+    rotary_dim *= 2
+    assert rotary_dim <= headdim
+    assert seqlen <= rotary_seqlen
+    assert sin.shape == (rotary_seqlen, rotary_dim // 2)
+    out = torch.empty_like(x)
+    # re_cos = rearrange(cos[:seqlen], "s d -> s 1 d")
+    # re_sin = rearrange(sin[:seqlen], "s d -> s 1 d")
+    ext.apply_rotary(
+        out[..., :rotary_dim],
+        x[..., :rotary_dim],
+        cos.view(rotary_seqlen, 1, -1),
+        sin.view(rotary_seqlen, 1, -1),
+        False,
+        False,
+    )
+    x.copy_(out)
+    return
